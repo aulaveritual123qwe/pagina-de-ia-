@@ -8,18 +8,18 @@ type GenerateImageBody = {
   count?: unknown;
 };
 
-const SIZE_BY_RATIO: Record<string, string> = {
-  '1:1': '1024x1024',
-  '4:5': '1024x1536',
-  '9:16': '1024x1536',
-  '16:9': '1536x1024',
+// Maps the app's UI aspect ratios to the ones the Higgsfield Soul v2 API accepts
+// ('9:16' | '16:9' | '4:3' | '3:4' | '1:1' | '2:3' | '3:2').
+const ASPECT_RATIO_MAP: Record<string, string> = {
+  '1:1': '1:1',
+  '4:5': '3:4',
+  '9:16': '9:16',
+  '16:9': '16:9',
 };
 
-const QUALITY_MAP: Record<string, string> = {
-  Estándar: 'low',
-  Alta: 'medium',
-  Ultra: 'high',
-};
+const SUBMIT_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard';
+const POLL_INTERVAL_MS = 3000;
+const MAX_POLL_ATTEMPTS = 30; // ~90s per image
 
 function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -28,15 +28,69 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type HiggsfieldSubmitResponse = {
+  status?: string;
+  request_id?: string;
+  status_url?: string;
+  error?: string;
+};
+
+type HiggsfieldStatusResponse = {
+  status?: 'queued' | 'in_progress' | 'completed' | 'failed';
+  images?: Array<{ url?: string }>;
+  error?: string;
+};
+
+async function generateOneImage(authHeader: string, prompt: string, aspectRatio: string): Promise<string> {
+  const submitResponse = await fetch(SUBMIT_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: authHeader,
+    },
+    body: JSON.stringify({ prompt, aspect_ratio: aspectRatio, image_url: '' }),
+  });
+
+  const submitPayload = (await submitResponse.json().catch(() => null)) as HiggsfieldSubmitResponse | null;
+  if (!submitResponse.ok || !submitPayload?.status_url) {
+    throw new Error(submitPayload?.error ?? `El proveedor de imágenes respondió con estado ${submitResponse.status}.`);
+  }
+
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+    await sleep(POLL_INTERVAL_MS);
+
+    const statusResponse = await fetch(submitPayload.status_url, {
+      headers: { Authorization: authHeader },
+    });
+    const statusPayload = (await statusResponse.json().catch(() => null)) as HiggsfieldStatusResponse | null;
+
+    if (!statusResponse.ok) {
+      throw new Error(statusPayload?.error ?? `No se pudo consultar el estado de la generación (${statusResponse.status}).`);
+    }
+
+    if (statusPayload?.status === 'completed') {
+      const url = statusPayload.images?.[0]?.url;
+      if (!url) throw new Error('La generación terminó sin devolver ninguna imagen.');
+      return url;
+    }
+
+    if (statusPayload?.status === 'failed') {
+      throw new Error(statusPayload.error ?? 'La generación de la imagen falló.');
+    }
+    // otherwise still "queued" or "in_progress" — keep polling
+  }
+
+  throw new Error('La generación tardó demasiado y se agotó el tiempo de espera.');
+}
+
 export async function POST(request: Request) {
-  // Read at request time (not module scope) so a key added after the dev
-  // server started is picked up without a restart in most environments.
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.HIGGSFIELD_API_KEY;
   if (!apiKey) {
-    return json(
-      { error: 'OPENAI_API_KEY no está configurada en el servidor todavía.' },
-      501,
-    );
+    return json({ error: 'HIGGSFIELD_API_KEY no está configurada en el servidor todavía.' }, 501);
   }
 
   const body = (await request.json().catch(() => null)) as GenerateImageBody | null;
@@ -46,51 +100,32 @@ export async function POST(request: Request) {
   }
 
   const style = typeof body?.style === 'string' ? body.style : 'Realista';
-  const aspectRatio = typeof body?.aspectRatio === 'string' ? body.aspectRatio : '1:1';
-  const quality = typeof body?.quality === 'string' ? body.quality : 'Alta';
+  const aspectRatio = ASPECT_RATIO_MAP[body?.aspectRatio as string] ?? '1:1';
   const rawCount = typeof body?.count === 'number' ? body.count : Number(body?.count);
   const count = [1, 2, 4].includes(rawCount) ? rawCount : 1;
 
+  const authHeader = `Key ${apiKey}`;
+  const fullPrompt = `${style}: ${prompt}`;
+
   try {
-    const apiUrl = process.env.OPENAI_IMAGE_API_URL ?? 'https://api.openai.com/v1/images/generations';
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-image-1',
-        prompt: `${style}: ${prompt}`,
-        size: SIZE_BY_RATIO[aspectRatio] ?? '1024x1024',
-        quality: QUALITY_MAP[quality] ?? 'medium',
-        n: count,
-      }),
-    });
+    const results = await Promise.allSettled(
+      Array.from({ length: count }, () => generateOneImage(authHeader, fullPrompt, aspectRatio)),
+    );
 
-    if (!response.ok) {
-      const errorBody = (await response.json().catch(() => null)) as {
-        error?: { message?: string };
-      } | null;
-      const message =
-        errorBody?.error?.message ?? `La API de imágenes respondió con estado ${response.status}.`;
-      return json({ error: message }, response.status);
-    }
-
-    const payload = (await response.json()) as { data?: Array<{ b64_json?: string }> };
-    const images = (payload.data ?? [])
-      .map((item) => item.b64_json)
-      .filter((value): value is string => Boolean(value))
-      .map((b64) => `data:image/png;base64,${b64}`);
+    const images = results
+      .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+      .map((result) => result.value);
 
     if (!images.length) {
-      return json({ error: 'La API no devolvió imágenes.' }, 502);
+      const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo generar ninguna imagen.';
+      return json({ error: message }, 502);
     }
 
     return json({ images });
   } catch (error) {
     return json(
-      { error: error instanceof Error ? error.message : 'Error al contactar la API de imágenes.' },
+      { error: error instanceof Error ? error.message : 'Error al contactar al proveedor de imágenes.' },
       500,
     );
   }
