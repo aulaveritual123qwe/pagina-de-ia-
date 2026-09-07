@@ -96,6 +96,7 @@ export default function HomePage() {
   const [ratio, setRatio] = useState('4:5');
   const [quality, setQuality] = useState('Alta');
   const [imageCount, setImageCount] = useState('4');
+  const [model, setModel] = useState('higgsfield');
   const [credits, setCredits] = useState(320);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState(media);
@@ -242,6 +243,7 @@ export default function HomePage() {
         aspectRatio: ratio,
         quality,
         count: amount,
+        model,
       });
       setResults(images);
       setResultSource(source);
@@ -331,6 +333,8 @@ export default function HomePage() {
               setQuality={setQuality}
               imageCount={imageCount}
               setImageCount={setImageCount}
+              model={model}
+              setModel={setModel}
               isGenerating={isGenerating}
               onGenerate={handleGenerate}
               results={results}
@@ -588,6 +592,8 @@ type CreateViewProps = {
   setQuality: (value: string) => void;
   imageCount: string;
   setImageCount: (value: string) => void;
+  model: string;
+  setModel: (value: string) => void;
   isGenerating: boolean;
   onGenerate: () => void;
   results: string[];
@@ -670,6 +676,7 @@ function CreateView(props: CreateViewProps) {
 
           <Step title="Ajustes de imagen" number="3">
             <div className="settings-grid">
+              <SelectField label="Modelo" value={props.model} onChange={props.setModel} options={['higgsfield', 'qwen']} />
               <SelectField label="Estilo" value={props.style} onChange={props.setStyle} options={['Realista', 'Editorial', 'Cinematográfico', 'Ilustración']} />
               <SelectField label="Formato" value={props.ratio} onChange={props.setRatio} options={['1:1', '4:5', '9:16', '16:9']} />
               <SelectField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />

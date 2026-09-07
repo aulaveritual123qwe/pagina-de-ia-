@@ -4,6 +4,7 @@ export type ImageRequest = {
   aspectRatio: string;
   quality: string;
   count: number;
+  model?: string;
 };
 
 export type ImageGenerationResult = {
