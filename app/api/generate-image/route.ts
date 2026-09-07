@@ -200,7 +200,7 @@ async function generateOneImageKling(apiKey: string, prompt: string, size: strin
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': apiKey,
+      'X-API-Key': apiKey,
     },
     body: JSON.stringify({
       prompt,
