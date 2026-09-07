@@ -131,19 +131,16 @@ async function generateOneImageQwen(apiKey: string, prompt: string, size: string
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      'Authorization': `Bearer ${apiKey}`,
       'X-DashScope-Async': 'enable',
     },
     body: JSON.stringify({
       model: 'qwen-vl-plus',
       input: {
         prompt,
-        image_width: width,
-        image_height: height,
       },
       parameters: {
-        quality: 'standard',
-        seed: Math.floor(Math.random() * 1000000),
+        size,
       },
     }),
   });
@@ -203,10 +200,9 @@ async function generateOneImageKling(apiKey: string, prompt: string, size: strin
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      'Authorization': apiKey,
     },
     body: JSON.stringify({
-      model: 'kling-v1',
       prompt,
       image_size: size,
     }),
