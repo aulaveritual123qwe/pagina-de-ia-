@@ -453,6 +453,10 @@ function GoogleIcon() {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+// Single fixed account for the demo — no backend/user database yet.
+const ACCOUNT_EMAIL = 'admin@creatorsacademy.pro';
+const ACCOUNT_PASSWORD = 'Creators2026!';
+
 function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; onNotify: (message: string) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -490,6 +494,10 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
     }
     if (password.length < 6) {
       setError('Tu contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    if (cleanEmail !== ACCOUNT_EMAIL || password !== ACCOUNT_PASSWORD) {
+      setError('Correo o contraseña incorrectos.');
       return;
     }
 
