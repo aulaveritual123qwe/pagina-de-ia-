@@ -116,16 +116,26 @@ type QwenTaskResponse = {
 };
 
 async function generateOneImageQwen(apiKey: string, prompt: string, size: string): Promise<string> {
+  const [width, height] = size.split('x').map(Number);
+
   const submitResponse = await fetch(QWEN_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
+      'X-DashScope-Async': 'enable',
     },
     body: JSON.stringify({
-      model: 'qwen-vl-plus',
-      input: { prompt, size },
-      parameters: { quality: 'standard' },
+      model: 'qwen-vl-plus-latest',
+      input: {
+        prompt,
+        image_width: width,
+        image_height: height,
+      },
+      parameters: {
+        quality: 'standard',
+        seed: Math.floor(Math.random() * 1000000),
+      },
     }),
   });
 
@@ -141,7 +151,9 @@ async function generateOneImageQwen(apiKey: string, prompt: string, size: string
 
     const statusResponse = await fetch(`${QWEN_API_URL}?task_id=${taskId}`, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
     });
     const statusPayload = (await statusResponse.json().catch(() => null)) as QwenTaskResponse | null;
 
