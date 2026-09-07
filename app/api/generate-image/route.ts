@@ -125,23 +125,16 @@ type QwenTaskResponse = {
 };
 
 async function generateOneImageQwen(apiKey: string, prompt: string, size: string): Promise<string> {
-  const [width, height] = size.split('x').map(Number);
-
   const submitResponse = await fetch(QWEN_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
-      'X-DashScope-Async': 'enable',
     },
     body: JSON.stringify({
-      model: 'qwen-vl-plus',
-      input: {
-        prompt,
-      },
-      parameters: {
-        size,
-      },
+      model: 'qwen-vl-plus-latest',
+      prompt,
+      size,
     }),
   });
 
@@ -200,11 +193,11 @@ async function generateOneImageKling(apiKey: string, prompt: string, size: strin
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': apiKey,
+      'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       prompt,
-      image_size: size,
+      size,
     }),
   });
 
