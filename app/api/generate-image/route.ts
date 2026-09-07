@@ -126,7 +126,7 @@ async function generateOneImageQwen(apiKey: string, prompt: string, size: string
       'X-DashScope-Async': 'enable',
     },
     body: JSON.stringify({
-      model: 'qwen-vl-7b-instruct',
+      model: 'qwen-vl-plus',
       input: {
         prompt,
         image_width: width,
