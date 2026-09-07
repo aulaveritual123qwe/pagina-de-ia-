@@ -1040,3 +1040,108 @@ button { font-weight: 500; }
 .credit-pill strong { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .generation-summary .estimated-cost { font-variant-numeric: tabular-nums; }
 .price strong { font-variant-numeric: tabular-nums; }
+
+/* --- Account menu --- */
+
+.popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+.profile-popover {
+  position: absolute;
+  z-index: 80;
+  top: 56px;
+  right: 0;
+  width: 250px;
+  padding: 6px;
+  border: 1px solid rgb(16 24 40 / 8%);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow-xl);
+  animation: floatIn 180ms var(--ease-out) both;
+}
+.profile-popover-head {
+  padding: 11px 12px 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgb(16 24 40 / 7%);
+}
+.profile-popover-head strong { display: block; font-size: 14px; color: #16192a; }
+.profile-popover-head small {
+  display: block;
+  margin-top: 3px;
+  color: #757c8f;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-popover > button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #333849;
+  font-size: 13px;
+  text-align: left;
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+.profile-popover > button svg { color: #7a8090; transition: color 160ms var(--ease-out); }
+.profile-popover > button:hover { background: #f4f2fc; color: #5f1fe4; }
+.profile-popover > button:hover svg { color: #6f28ec; }
+.profile-popover .logout-action {
+  margin-top: 4px;
+  border-top: 1px solid rgb(16 24 40 / 7%);
+  border-radius: 0 0 8px 8px;
+  color: #c02a4e;
+}
+.profile-popover .logout-action svg { color: #d4546f; }
+.profile-popover .logout-action:hover { background: #fdf0f3; color: #a81f41; }
+.profile-popover .logout-action:hover svg { color: #c02a4e; }
+
+.account-actions {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid rgb(16 24 40 / 8%);
+}
+.account-actions h2 { margin: 0 0 6px; font-size: 18px; }
+.account-actions p { margin: 0 0 14px; color: #737a8d; font-size: 13px; }
+.account-actions p strong { color: #3b4155; font-weight: 600; }
+.logout-button {
+  width: 100%;
+  gap: 8px;
+  color: #c02a4e;
+  background: #fdf0f3;
+  border: 1px solid rgb(192 42 78 / 16%);
+  transition: background 180ms var(--ease-out), transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
+}
+.logout-button:hover { background: #fbe3e9; box-shadow: var(--shadow-xs); }
+.logout-button:active { transform: scale(0.98); }
+
+/* --- Login validation --- */
+
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 11px 13px;
+  border: 1px solid rgb(255 88 119 / 32%);
+  border-radius: 10px;
+  background: rgb(255 88 119 / 10%);
+  color: #ffb3c1;
+  font-size: 13px;
+  line-height: 1.45;
+  animation: floatIn 200ms var(--ease-out) both;
+}
+
+@media (max-width: 560px) {
+  .profile-popover { right: -6px; width: min(250px, calc(100vw - 24px)); }
+}

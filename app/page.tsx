@@ -19,6 +19,7 @@ import {
   Library,
   LayoutTemplate,
   LoaderCircle,
+  LogOut,
   Mail,
   Menu,
   Music2,
@@ -85,8 +86,20 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: 'ajustes', label: 'Configuración', icon: Settings },
 ];
 
+const SESSION_KEY = 'creators-session-email';
+
+function nameFromEmail(email: string) {
+  const handle = email.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+  if (!handle) return 'Creador';
+  return handle
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 export default function HomePage() {
-  const [authenticated, setAuthenticated] = useState(false);
+  const [accountEmail, setAccountEmail] = useState('');
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [view, setView] = useState<View>('crear');
   const [mobileNav, setMobileNav] = useState(false);
   const [prompt, setPrompt] = useState(
@@ -109,12 +122,42 @@ export default function HomePage() {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [plan, setPlan] = useState('Free');
   const [selectedAvatar, setSelectedAvatar] = useState('Lua');
-  const [profileName, setProfileName] = useState('Lalo Balarezo');
+  const [profileName, setProfileName] = useState('');
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+
+  const authenticated = Boolean(accountEmail);
+  const displayName = profileName || (accountEmail ? nameFromEmail(accountEmail) : '');
 
   const activeLabel = useMemo(
     () => navItems.find((item) => item.id === view)?.label ?? 'Crear imagen',
     [view],
   );
+
+  useEffect(() => {
+    setAccountEmail(window.localStorage.getItem(SESSION_KEY) ?? '');
+    setSessionChecked(true);
+  }, []);
+
+  function handleLogin(email: string) {
+    window.localStorage.setItem(SESSION_KEY, email);
+    setAccountEmail(email);
+    setView('crear');
+    notify(`Bienvenido de nuevo, ${nameFromEmail(email).split(' ')[0]}.`);
+  }
+
+  function handleLogout() {
+    window.localStorage.removeItem(SESSION_KEY);
+    setAccountEmail('');
+    setProfileName('');
+    setProfileMenuOpen(false);
+    setNotificationOpen(false);
+    setMobileNav(false);
+    setResults(media);
+    setResultSource('demo');
+    setFavorites([]);
+    setUploadedImages([]);
+    setNotice('Cerraste sesión correctamente.');
+  }
 
   useEffect(() => {
     const context = document.modelContext;
@@ -260,16 +303,12 @@ export default function HomePage() {
     }
   }
 
+  if (!sessionChecked) return null;
+
   if (!authenticated) {
     return (
       <>
-        <LoginView
-          onLogin={() => {
-            setAuthenticated(true);
-            notify(`Bienvenido de nuevo, ${profileName.trim().split(/\s+/)[0] || 'Lalo'}.`);
-          }}
-          onNotify={notify}
-        />
+        <LoginView onLogin={handleLogin} onNotify={notify} />
         {notice && <div className="app-notice" role="status"><Check size={18} /> {notice}</div>}
       </>
     );
@@ -309,14 +348,45 @@ export default function HomePage() {
               <span />
             </button>
             {notificationOpen && <div className="notification-popover"><strong>Notificaciones</strong><p>Tu estudio está listo para crear.</p><button type="button" onClick={() => setNotificationOpen(false)}>Marcar como leída</button></div>}
-            <button className="profile-button" type="button" aria-label="Abrir perfil" onClick={() => navigate('ajustes')}>
-              <img src="/assets/creator-portrait-1.png" alt="Avatar de Lalo" />
+            <button
+              className="profile-button"
+              type="button"
+              aria-label="Abrir perfil"
+              aria-expanded={profileMenuOpen}
+              onClick={() => { setProfileMenuOpen((current) => !current); setNotificationOpen(false); }}
+            >
+              <img src="/assets/creator-portrait-1.png" alt={`Avatar de ${displayName}`} />
               <span>
-                <strong>Hola, {profileName.trim().split(/\s+/)[0] || 'Lalo'}</strong>
+                <strong>Hola, {displayName.split(' ')[0]}</strong>
                 <small>{plan === 'Free' ? 'Creator Free' : `Plan ${plan}`}</small>
               </span>
               <ChevronDown size={16} />
             </button>
+            {(profileMenuOpen || notificationOpen) && (
+              <button
+                className="popover-backdrop"
+                type="button"
+                aria-label="Cerrar menú"
+                onClick={() => { setProfileMenuOpen(false); setNotificationOpen(false); }}
+              />
+            )}
+            {profileMenuOpen && (
+              <div className="profile-popover">
+                <div className="profile-popover-head">
+                  <strong>{displayName}</strong>
+                  <small>{accountEmail}</small>
+                </div>
+                <button type="button" onClick={() => { setProfileMenuOpen(false); navigate('ajustes'); }}>
+                  <Settings size={16} /> Configuración
+                </button>
+                <button type="button" onClick={() => { setProfileMenuOpen(false); navigate('planes'); }}>
+                  <Coins size={16} /> Planes y créditos
+                </button>
+                <button type="button" className="logout-action" onClick={handleLogout}>
+                  <LogOut size={16} /> Cerrar sesión
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -354,7 +424,15 @@ export default function HomePage() {
           {view === 'plantillas' && <TemplatesView onUseTemplate={useTemplate} />}
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
           {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 500); notify('Se añadieron 500 créditos de demostración.'); }} />}
-          {view === 'ajustes' && <SettingsView onNotify={notify} profileName={profileName} onProfileNameChange={setProfileName} />}
+          {view === 'ajustes' && (
+            <SettingsView
+              onNotify={notify}
+              profileName={displayName}
+              accountEmail={accountEmail}
+              onProfileNameChange={setProfileName}
+              onLogout={handleLogout}
+            />
+          )}
         </main>
       </div>
       {notice && <div className="app-notice" role="status"><Check size={18} /> {notice}</div>}
@@ -373,11 +451,14 @@ function GoogleIcon() {
   );
 }
 
-function LoginView({ onLogin, onNotify }: { onLogin: () => void; onNotify: (message: string) => void }) {
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; onNotify: (message: string) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     const rememberedEmail = window.localStorage.getItem('remembered-email');
@@ -397,17 +478,28 @@ function LoginView({ onLogin, onNotify }: { onLogin: () => void; onNotify: (mess
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!email.trim() || !password.trim()) {
-      onNotify('Ingresa tu correo y contraseña para continuar.');
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail || !password) {
+      setError('Ingresa tu correo y contraseña para continuar.');
       return;
     }
-    persistRememberedEmail(email.trim());
-    onLogin();
+    if (!EMAIL_PATTERN.test(cleanEmail)) {
+      setError('Escribe un correo electrónico válido, por ejemplo nombre@correo.com');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Tu contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+
+    setError('');
+    persistRememberedEmail(cleanEmail);
+    onLogin(cleanEmail);
   }
 
   function handleGoogleLogin() {
-    onNotify('Inicio de sesión con Google en modo demostración.');
-    onLogin();
+    onNotify('El acceso con Google aún no está disponible. Inicia sesión con tu correo electrónico.');
   }
 
   function comingSoon(label: string) {
@@ -461,7 +553,7 @@ function LoginView({ onLogin, onNotify }: { onLogin: () => void; onNotify: (mess
                 type="email"
                 placeholder="Correo electrónico"
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => { setEmail(event.target.value); setError(''); }}
                 autoComplete="email"
               />
             </label>
@@ -471,7 +563,7 @@ function LoginView({ onLogin, onNotify }: { onLogin: () => void; onNotify: (mess
                 type={showPassword ? 'text' : 'password'}
                 placeholder="Contraseña"
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => { setPassword(event.target.value); setError(''); }}
                 autoComplete="current-password"
               />
               <button
@@ -483,6 +575,8 @@ function LoginView({ onLogin, onNotify }: { onLogin: () => void; onNotify: (mess
                 {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
               </button>
             </label>
+
+            {error && <p className="auth-error" role="alert">{error}</p>}
 
             <div className="auth-row">
               <label className="auth-checkbox">
@@ -973,11 +1067,11 @@ function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string
   );
 }
 
-function SettingsView({ onNotify, profileName, onProfileNameChange }: { onNotify: (message: string) => void; profileName: string; onProfileNameChange: (name: string) => void }) {
+function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange, onLogout }: { onNotify: (message: string) => void; profileName: string; accountEmail: string; onProfileNameChange: (name: string) => void; onLogout: () => void }) {
   const [autoSave, setAutoSave] = useState(true);
   const [emails, setEmails] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [profile, setProfile] = useState({ name: profileName, email: 'lalo@creator.studio', language: 'Español', timezone: 'GMT-05:00 · Lima' });
+  const [profile, setProfile] = useState({ name: profileName, email: accountEmail, language: 'Español', timezone: 'GMT-05:00 · Lima' });
 
   useEffect(() => {
     const saved = window.localStorage.getItem('creator-profile');
@@ -1004,8 +1098,16 @@ function SettingsView({ onNotify, profileName, onProfileNameChange }: { onNotify
     <div className="view-stack">
       <PageHeading eyebrow="TU ESPACIO" title="Configuración" description="Ajusta tu perfil y cómo quieres trabajar dentro del estudio." note="Hecho a tu manera" />
       <div className="settings-page-grid">
-        <section className="profile-settings"><div className="section-title-row"><h2>Información del perfil</h2><Button variant="secondary" size="sm" type="button" onClick={() => editing ? saveProfile() : setEditing(true)}>{editing ? 'Guardar' : 'Editar'}</Button></div><div className="profile-summary"><img src="/assets/creator-portrait-1.png" alt="Foto de perfil" /><div><strong>{profile.name}</strong><span>@lalo.creator</span><small>Creador de contenido · Perú</small></div></div><div className="form-grid"><label>Nombre<input value={profile.name} readOnly={!editing} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></label><label>Correo<input value={profile.email} readOnly={!editing} onChange={(event) => setProfile({ ...profile, email: event.target.value })} /></label><label>Idioma<input value={profile.language} readOnly={!editing} onChange={(event) => setProfile({ ...profile, language: event.target.value })} /></label><label>Zona horaria<input value={profile.timezone} readOnly={!editing} onChange={(event) => setProfile({ ...profile, timezone: event.target.value })} /></label></div></section>
-        <section className="preference-settings"><h2>Preferencias</h2><PreferenceRow icon={FolderHeart} title="Guardar automáticamente" copy="Añade cada generación a tu biblioteca." checked={autoSave} onChange={(checked) => { setAutoSave(checked); onNotify(checked ? 'Guardado automático activado.' : 'Guardado automático desactivado.'); }} /><PreferenceRow icon={Bell} title="Novedades por correo" copy="Recibe nuevas funciones y consejos." checked={emails} onChange={(checked) => { setEmails(checked); onNotify(checked ? 'Novedades por correo activadas.' : 'Novedades por correo desactivadas.'); }} /></section>
+        <section className="profile-settings"><div className="section-title-row"><h2>Información del perfil</h2><Button variant="secondary" size="sm" type="button" onClick={() => editing ? saveProfile() : setEditing(true)}>{editing ? 'Guardar' : 'Editar'}</Button></div><div className="profile-summary"><img src="/assets/creator-portrait-1.png" alt="Foto de perfil" /><div><strong>{profile.name}</strong><span>{accountEmail}</span><small>Creador de contenido · Perú</small></div></div><div className="form-grid"><label>Nombre<input value={profile.name} readOnly={!editing} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></label><label>Correo<input value={profile.email} readOnly={!editing} onChange={(event) => setProfile({ ...profile, email: event.target.value })} /></label><label>Idioma<input value={profile.language} readOnly={!editing} onChange={(event) => setProfile({ ...profile, language: event.target.value })} /></label><label>Zona horaria<input value={profile.timezone} readOnly={!editing} onChange={(event) => setProfile({ ...profile, timezone: event.target.value })} /></label></div></section>
+        <section className="preference-settings"><h2>Preferencias</h2><PreferenceRow icon={FolderHeart} title="Guardar automáticamente" copy="Añade cada generación a tu biblioteca." checked={autoSave} onChange={(checked) => { setAutoSave(checked); onNotify(checked ? 'Guardado automático activado.' : 'Guardado automático desactivado.'); }} /><PreferenceRow icon={Bell} title="Novedades por correo" copy="Recibe nuevas funciones y consejos." checked={emails} onChange={(checked) => { setEmails(checked); onNotify(checked ? 'Novedades por correo activadas.' : 'Novedades por correo desactivadas.'); }} />
+          <div className="account-actions">
+            <h2>Cuenta</h2>
+            <p>Sesión iniciada como <strong>{accountEmail}</strong></p>
+            <Button variant="secondary" type="button" className="logout-button" onClick={onLogout}>
+              <LogOut size={17} /> Cerrar sesión
+            </Button>
+          </div>
+        </section>
       </div>
     </div>
   );
