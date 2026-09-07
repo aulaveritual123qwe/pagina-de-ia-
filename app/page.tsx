@@ -676,7 +676,7 @@ function CreateView(props: CreateViewProps) {
 
           <Step title="Ajustes de imagen" number="3">
             <div className="settings-grid">
-              <SelectField label="Modelo" value={props.model} onChange={props.setModel} options={['higgsfield', 'qwen']} />
+              <SelectField label="Modelo" value={props.model} onChange={props.setModel} options={['higgsfield', 'qwen', 'kling']} />
               <SelectField label="Estilo" value={props.style} onChange={props.setStyle} options={['Realista', 'Editorial', 'Cinematográfico', 'Ilustración']} />
               <SelectField label="Formato" value={props.ratio} onChange={props.setRatio} options={['1:1', '4:5', '9:16', '16:9']} />
               <SelectField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />

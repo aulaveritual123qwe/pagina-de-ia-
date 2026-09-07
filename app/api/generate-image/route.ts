@@ -25,8 +25,17 @@ const QWEN_SIZE_MAP: Record<string, string> = {
   '16:9': '1280x720',
 };
 
+// Kling supports: 1024x1024, 768x1344, 1344x768
+const KLING_SIZE_MAP: Record<string, string> = {
+  '1:1': '1024x1024',
+  '4:5': '768x1344',
+  '9:16': '768x1344',
+  '16:9': '1344x768',
+};
+
 const HIGGSFIELD_SUBMIT_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard';
 const QWEN_API_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
+const KLING_API_URL = 'https://api.klingai.com/v1/images/generations';
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 30;
 
@@ -175,6 +184,70 @@ async function generateOneImageQwen(apiKey: string, prompt: string, size: string
   throw new Error('Qwen tardó demasiado.');
 }
 
+// ===== Kling =====
+
+type KlingResponse = {
+  data?: { task_id?: string };
+  code?: string;
+  message?: string;
+};
+
+type KlingTaskResponse = {
+  data?: { task_status?: string; images?: Array<{ url?: string }> };
+  code?: string;
+  message?: string;
+};
+
+async function generateOneImageKling(apiKey: string, prompt: string, size: string): Promise<string> {
+  const submitResponse = await fetch(KLING_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'kling-v1',
+      prompt,
+      image_size: size,
+    }),
+  });
+
+  const submitPayload = (await submitResponse.json().catch(() => null)) as KlingResponse | null;
+  if (!submitResponse.ok || !submitPayload?.data?.task_id) {
+    throw new Error(submitPayload?.message ?? `Kling respondió con estado ${submitResponse.status}.`);
+  }
+
+  const taskId = submitPayload.data.task_id;
+
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+    await sleep(POLL_INTERVAL_MS);
+
+    const statusResponse = await fetch(`${KLING_API_URL}?task_id=${taskId}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+    const statusPayload = (await statusResponse.json().catch(() => null)) as KlingTaskResponse | null;
+
+    if (!statusResponse.ok) {
+      throw new Error(statusPayload?.message ?? `No se pudo consultar Kling (${statusResponse.status}).`);
+    }
+
+    if (statusPayload?.data?.task_status === 'SUCCESS') {
+      const url = statusPayload.data.images?.[0]?.url;
+      if (!url) throw new Error('Kling completó sin devolver imagen.');
+      return url;
+    }
+
+    if (statusPayload?.data?.task_status === 'FAILED') {
+      throw new Error('Kling falló al generar la imagen.');
+    }
+  }
+
+  throw new Error('Kling tardó demasiado.');
+}
+
 // ===== Main Handler =====
 
 export async function POST(request: Request) {
@@ -200,6 +273,27 @@ export async function POST(request: Request) {
       const fullPrompt = `${style}: ${prompt}`;
       const results = await Promise.allSettled(
         Array.from({ length: count }, () => generateOneImageQwen(apiKey, fullPrompt, size)),
+      );
+      const images = results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      if (!images.length) {
+        const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo generar.';
+        return json({ error: message }, 502);
+      }
+      return json({ images });
+    }
+
+    if (model === 'kling') {
+      const apiKey = process.env.KLING_API_KEY;
+      if (!apiKey) {
+        return json({ error: 'KLING_API_KEY no está configurada.' }, 501);
+      }
+      const size = KLING_SIZE_MAP[aspectRatio] ?? '1024x1024';
+      const fullPrompt = `${style}: ${prompt}`;
+      const results = await Promise.allSettled(
+        Array.from({ length: count }, () => generateOneImageKling(apiKey, fullPrompt, size)),
       );
       const images = results
         .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
