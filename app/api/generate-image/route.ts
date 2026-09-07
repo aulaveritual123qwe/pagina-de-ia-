@@ -7,6 +7,7 @@ type GenerateImageBody = {
   quality?: unknown;
   count?: unknown;
   model?: unknown;
+  referenceImage?: unknown;
 };
 
 // Maps UI aspect ratios to Higgsfield Soul v2 API ('9:16' | '16:9' | '4:3' | '3:4' | '1:1' | '2:3' | '3:2')
@@ -37,6 +38,8 @@ const HIGGSFIELD_SUBMIT_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/s
 // International (Singapore) DashScope endpoint — pay-as-you-go key (sk-ws-...), not the Token Plan key.
 const QWEN_SUBMIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
 const QWEN_TASK_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/tasks';
+// Synchronous image-editing endpoint used when a reference image is supplied.
+const QWEN_EDIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
 const KLING_API_URL = 'https://api.klingai.com/v1/images/generations';
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 30;
@@ -174,6 +177,44 @@ async function generateOneImageQwen(apiKey: string, prompt: string, size: string
   throw new Error('Qwen tardó demasiado.');
 }
 
+type QwenEditResponse = {
+  output?: { choices?: Array<{ message?: { content?: Array<{ image?: string }> } }> };
+  code?: string;
+  message?: string;
+};
+
+// Edits a reference image (image + text instruction) instead of generating from scratch.
+async function editOneImageQwen(apiKey: string, referenceImage: string, prompt: string): Promise<string> {
+  const response = await fetch(QWEN_EDIT_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'qwen-image-edit',
+      input: {
+        messages: [
+          {
+            role: 'user',
+            content: [{ image: referenceImage }, { text: prompt }],
+          },
+        ],
+      },
+      parameters: { n: 1, watermark: false },
+    }),
+  });
+
+  const payload = (await response.json().catch(() => null)) as QwenEditResponse | null;
+  if (!response.ok) {
+    throw new Error(payload?.message ?? `Qwen respondió con estado ${response.status}.`);
+  }
+
+  const url = payload?.output?.choices?.[0]?.message?.content?.find((item) => item.image)?.image;
+  if (!url) throw new Error('Qwen completó sin devolver imagen.');
+  return url;
+}
+
 // ===== Kling =====
 
 type KlingResponse = {
@@ -251,8 +292,30 @@ export async function POST(request: Request) {
   const aspectRatio = body?.aspectRatio as string;
   const rawCount = typeof body?.count === 'number' ? body.count : Number(body?.count);
   const count = [1, 2, 4].includes(rawCount) ? rawCount : 1;
+  const referenceImage = typeof body?.referenceImage === 'string' && body.referenceImage.length > 0 ? body.referenceImage : null;
 
   try {
+    // A reference image is edited in place — only Qwen-Image-Edit supports this today.
+    if (referenceImage) {
+      const apiKey = process.env.QWEN_API_KEY;
+      if (!apiKey) {
+        return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
+      }
+      const fullPrompt = `${style}: ${prompt}`;
+      const results = await Promise.allSettled(
+        Array.from({ length: count }, () => editOneImageQwen(apiKey, referenceImage, fullPrompt)),
+      );
+      const images = results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      if (!images.length) {
+        const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo editar la imagen.';
+        return json({ error: message }, 502);
+      }
+      return json({ images });
+    }
+
     if (model === 'qwen') {
       const apiKey = process.env.QWEN_API_KEY;
       if (!apiKey) {

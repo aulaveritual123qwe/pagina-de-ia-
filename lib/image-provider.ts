@@ -5,6 +5,7 @@ export type ImageRequest = {
   quality: string;
   count: number;
   model?: string;
+  referenceImage?: string;
 };
 
 export type ImageGenerationResult = {

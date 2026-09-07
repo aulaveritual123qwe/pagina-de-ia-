@@ -124,6 +124,7 @@ export default function HomePage() {
   const [selectedAvatar, setSelectedAvatar] = useState('Lua');
   const [profileName, setProfileName] = useState('');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [referenceImage, setReferenceImage] = useState<{ name: string; dataUrl: string } | null>(null);
 
   const authenticated = Boolean(accountEmail);
   const displayName = profileName || (accountEmail ? nameFromEmail(accountEmail) : '');
@@ -287,6 +288,7 @@ export default function HomePage() {
         quality,
         count: amount,
         model,
+        referenceImage: referenceImage?.dataUrl,
       });
       setResults(images);
       setResultSource(source);
@@ -416,6 +418,8 @@ export default function HomePage() {
               onNotify={notify}
               selectedAvatar={selectedAvatar}
               resultSource={resultSource}
+              referenceImage={referenceImage}
+              onReferenceImageChange={setReferenceImage}
             />
           )}
           {view === 'inicio' && <DashboardView onNavigate={navigate} credits={credits} />}
@@ -707,11 +711,14 @@ type CreateViewProps = {
   onNotify: (message: string) => void;
   selectedAvatar: string;
   resultSource: 'demo' | 'live';
+  referenceImage: { name: string; dataUrl: string } | null;
+  onReferenceImageChange: (value: { name: string; dataUrl: string } | null) => void;
 };
+
+const MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function CreateView(props: CreateViewProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [referenceName, setReferenceName] = useState('');
   const referenceInput = useRef<HTMLInputElement>(null);
   const currentImage = props.results[currentIndex] ?? props.results[0] ?? media[0];
   const avatarImage = props.selectedAvatar === 'Lua Beach' ? media[2] : props.selectedAvatar === 'Lua Studio' ? media[3] : media[1];
@@ -757,8 +764,27 @@ function CreateView(props: CreateViewProps) {
               maxLength={1000}
               aria-label="Descripción de la imagen"
             />
+            {props.referenceImage && (
+              <div className="reference-preview">
+                <img src={props.referenceImage.dataUrl} alt="Imagen de referencia" />
+                <div className="reference-preview-copy">
+                  <strong>{props.referenceImage.name}</strong>
+                  <small>La IA editará esta imagen según tu prompt</small>
+                </div>
+                <button
+                  type="button"
+                  className="reference-remove"
+                  aria-label="Quitar imagen de referencia"
+                  onClick={() => props.onReferenceImageChange(null)}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            )}
             <div className="prompt-meta">
-              <button type="button" className="reference-button" onClick={() => referenceInput.current?.click()}><Upload size={16} /> {referenceName || 'Añadir referencia'}</button>
+              <button type="button" className="reference-button" onClick={() => referenceInput.current?.click()}>
+                <Upload size={16} /> {props.referenceImage ? 'Cambiar referencia' : 'Añadir referencia'}
+              </button>
               <input
                 ref={referenceInput}
                 className="visually-hidden"
@@ -766,10 +792,20 @@ function CreateView(props: CreateViewProps) {
                 accept="image/*"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  if (file) {
-                    setReferenceName(file.name);
-                    props.onNotify('Imagen de referencia añadida al prompt.');
+                  event.target.value = '';
+                  if (!file) return;
+                  if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
+                    props.onNotify('La imagen de referencia debe pesar menos de 5 MB.');
+                    return;
                   }
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    if (typeof reader.result === 'string') {
+                      props.onReferenceImageChange({ name: file.name, dataUrl: reader.result });
+                      props.onNotify('Imagen de referencia añadida. Se usará para editar el resultado.');
+                    }
+                  };
+                  reader.readAsDataURL(file);
                 }}
               />
               <span>{props.prompt.length}/1000</span>
@@ -778,18 +814,27 @@ function CreateView(props: CreateViewProps) {
 
           <Step title="Ajustes de imagen" number="3">
             <div className="settings-grid">
-              <SelectField label="Modelo" value={props.model} onChange={props.setModel} options={['higgsfield', 'qwen', 'kling']} />
+              <SelectField label="Modelo" value={props.model} onChange={props.setModel} options={['higgsfield', 'qwen', 'kling']} disabled={Boolean(props.referenceImage)} />
               <SelectField label="Estilo" value={props.style} onChange={props.setStyle} options={['Realista', 'Editorial', 'Cinematográfico', 'Ilustración']} />
-              <SelectField label="Formato" value={props.ratio} onChange={props.setRatio} options={['1:1', '4:5', '9:16', '16:9']} />
+              <SelectField label="Formato" value={props.ratio} onChange={props.setRatio} options={['1:1', '4:5', '9:16', '16:9']} disabled={Boolean(props.referenceImage)} />
               <SelectField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />
               <SelectField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} suffix=" imágenes" />
             </div>
+            {props.referenceImage && (
+              <p className="reference-note">Usando <strong>Qwen Image Edit</strong> para transformar tu imagen de referencia — el modelo y formato no aplican en este modo.</p>
+            )}
           </Step>
 
           <div className="generation-summary">
             <div>
               <span>Listo para generar</span>
-              <small>{props.resultSource === 'live' ? 'Conectado a la API de imágenes' : 'Modo demostración · Añade tu API key para generar imágenes reales'}</small>
+              <small>
+                {props.referenceImage
+                  ? 'Editando tu imagen de referencia con IA'
+                  : props.resultSource === 'live'
+                    ? 'Conectado a la API de imágenes'
+                    : 'Modo demostración · Añade tu API key para generar imágenes reales'}
+              </small>
             </div>
             <span className="estimated-cost"><Coins size={16} /> {props.imageCount} créditos</span>
           </div>
@@ -861,11 +906,11 @@ function Step({ title, number, children }: { title: string; number: string; chil
   return <div className="step-block"><div className="step-title"><span>{number}</span><h2>{title}</h2></div><div className="step-content">{children}</div></div>;
 }
 
-function SelectField({ label, value, onChange, options, suffix = '' }: { label: string; value: string; onChange: (value: string) => void; options: string[]; suffix?: string }) {
+function SelectField({ label, value, onChange, options, suffix = '', disabled = false }: { label: string; value: string; onChange: (value: string) => void; options: string[]; suffix?: string; disabled?: boolean }) {
   return (
     <label className="select-field">
       <span>{label}</span>
-      <Select value={value} onValueChange={(next) => next && onChange(next)}>
+      <Select value={value} onValueChange={(next) => next && onChange(next)} disabled={disabled}>
         <SelectTrigger><SelectValue>{value}{suffix}</SelectValue></SelectTrigger>
         <SelectContent>{options.map((option) => <SelectItem key={option} value={option}>{option}{suffix}</SelectItem>)}</SelectContent>
       </Select>
