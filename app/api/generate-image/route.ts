@@ -17,12 +17,12 @@ const HIGGSFIELD_ASPECT_RATIO_MAP: Record<string, string> = {
   '16:9': '16:9',
 };
 
-// Qwen supports: 1024x1024, 720x1280, 1280x720
+// Qwen-Image (DashScope) expects "WxH" with '*' as separator.
 const QWEN_SIZE_MAP: Record<string, string> = {
-  '1:1': '1024x1024',
-  '4:5': '720x1280',
-  '9:16': '720x1280',
-  '16:9': '1280x720',
+  '1:1': '1024*1024',
+  '4:5': '928*1152',
+  '9:16': '768*1344',
+  '16:9': '1344*768',
 };
 
 // Kling supports: 1024x1024, 768x1344, 1344x768
@@ -34,7 +34,9 @@ const KLING_SIZE_MAP: Record<string, string> = {
 };
 
 const HIGGSFIELD_SUBMIT_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard';
-const QWEN_API_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
+// International (Singapore) DashScope endpoint — pay-as-you-go key (sk-ws-...), not the Token Plan key.
+const QWEN_SUBMIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
+const QWEN_TASK_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/tasks';
 const KLING_API_URL = 'https://api.klingai.com/v1/images/generations';
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 30;
@@ -110,9 +112,9 @@ async function generateOneImageHiggsfield(
   throw new Error('Higgsfield tardó demasiado.');
 }
 
-// ===== Qwen =====
+// ===== Qwen-Image (Alibaba Model Studio, DashScope international) =====
 
-type QwenResponse = {
+type QwenSubmitResponse = {
   output?: { task_id?: string };
   code?: string;
   message?: string;
@@ -125,20 +127,21 @@ type QwenTaskResponse = {
 };
 
 async function generateOneImageQwen(apiKey: string, prompt: string, size: string): Promise<string> {
-  const submitResponse = await fetch(QWEN_API_URL, {
+  const submitResponse = await fetch(QWEN_SUBMIT_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
+      'X-DashScope-Async': 'enable',
     },
     body: JSON.stringify({
-      model: 'qwen-vl-plus-latest',
-      prompt,
-      size,
+      model: 'qwen-image',
+      input: { prompt },
+      parameters: { size, n: 1 },
     }),
   });
 
-  const submitPayload = (await submitResponse.json().catch(() => null)) as QwenResponse | null;
+  const submitPayload = (await submitResponse.json().catch(() => null)) as QwenSubmitResponse | null;
   if (!submitResponse.ok || !submitPayload?.output?.task_id) {
     throw new Error(submitPayload?.message ?? `Qwen respondió con estado ${submitResponse.status}.`);
   }
@@ -148,11 +151,8 @@ async function generateOneImageQwen(apiKey: string, prompt: string, size: string
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
     await sleep(POLL_INTERVAL_MS);
 
-    const statusResponse = await fetch(`${QWEN_API_URL}?task_id=${taskId}`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
+    const statusResponse = await fetch(`${QWEN_TASK_URL}/${taskId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
     const statusPayload = (await statusResponse.json().catch(() => null)) as QwenTaskResponse | null;
 
