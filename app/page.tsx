@@ -424,7 +424,7 @@ export default function HomePage() {
           )}
           {view === 'inicio' && <DashboardView onNavigate={navigate} credits={credits} />}
           {view === 'avatares' && <AvatarsView onNavigate={navigate} plan={plan} onNotify={notify} selectedAvatar={selectedAvatar} onSelectAvatar={setSelectedAvatar} />}
-          {view === 'video' && <VideoView credits={credits} onSpendCredits={spendCredits} />}
+          {view === 'video' && <VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} />}
           {view === 'plantillas' && <TemplatesView onUseTemplate={useTemplate} />}
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
           {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 500); notify('Se añadieron 500 créditos de demostración.'); }} />}
@@ -1006,13 +1006,36 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
   );
 }
 
-function VideoView({ credits, onSpendCredits }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean }) {
+const VIDEO_POLL_INTERVAL_MS = 5000;
+const VIDEO_MAX_POLL_ATTEMPTS = 60; // up to ~5 minutes
+
+function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean; onNotify: (message: string) => void }) {
   const [videoPrompt, setVideoPrompt] = useState('Lua caminando por una cafetería creativa, movimiento de cámara suave y luz cinematográfica.');
   const [duration, setDuration] = useState('5 segundos');
+  const [ratio, setRatio] = useState('9:16');
   const [generating, setGenerating] = useState(false);
-  const [generated, setGenerated] = useState(false);
+  const [statusLabel, setStatusLabel] = useState('');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [isLive, setIsLive] = useState(false);
+  const cancelRef = useRef(false);
 
-  function generateVideo() {
+  useEffect(() => () => { cancelRef.current = true; }, []);
+
+  async function pollVideoTask(taskId: string): Promise<string> {
+    for (let attempt = 0; attempt < VIDEO_MAX_POLL_ATTEMPTS; attempt += 1) {
+      if (cancelRef.current) throw new Error('cancelled');
+      await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_INTERVAL_MS));
+      const response = await fetch(`/api/generate-video?taskId=${taskId}`);
+      const data = (await response.json().catch(() => null)) as { status?: string; url?: string; error?: string } | null;
+      if (!response.ok) throw new Error(data?.error ?? 'No se pudo consultar el estado del video.');
+      if (data?.status === 'SUCCEEDED' && data.url) return data.url;
+      if (data?.status === 'FAILED') throw new Error(data.error ?? 'La generación de video falló.');
+      setStatusLabel(attempt < 6 ? 'Interpretando tu idea...' : 'Renderizando el clip, puede tardar unos minutos...');
+    }
+    throw new Error('El video tardó demasiado en generarse.');
+  }
+
+  async function generateVideo() {
     if (!videoPrompt.trim() || generating) return;
     const cost = duration === '10 segundos' ? 20 : 12;
     if (credits < cost) {
@@ -1020,11 +1043,33 @@ function VideoView({ credits, onSpendCredits }: { credits: number; onSpendCredit
       return;
     }
     setGenerating(true);
-    window.setTimeout(() => {
-      setGenerated(true);
+    setStatusLabel('Enviando tu idea...');
+    setVideoUrl('');
+    try {
+      const submitResponse = await fetch('/api/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: videoPrompt,
+          aspectRatio: ratio,
+          duration: duration === '10 segundos' ? 10 : 5,
+        }),
+      });
+      const submitData = (await submitResponse.json().catch(() => null)) as { taskId?: string; error?: string } | null;
+      if (!submitResponse.ok || !submitData?.taskId) {
+        throw new Error(submitData?.error ?? 'No se pudo iniciar la generación de video.');
+      }
+      const url = await pollVideoTask(submitData.taskId);
+      setVideoUrl(url);
+      setIsLive(true);
+      onSpendCredits(cost, 'Video generado correctamente con IA.');
+    } catch (error) {
+      if (error instanceof Error && error.message === 'cancelled') return;
+      onNotify(error instanceof Error ? error.message : 'No se pudo generar el video. Inténtalo nuevamente.');
+    } finally {
       setGenerating(false);
-      onSpendCredits(cost, 'Video de demostración generado correctamente.');
-    }, 1400);
+      setStatusLabel('');
+    }
   }
 
   return (
@@ -1033,19 +1078,29 @@ function VideoView({ credits, onSpendCredits }: { credits: number; onSpendCredit
       <section className="video-coming-card">
         <div className="video-coming-copy">
           <span><Video size={24} /></span>
-          <small>MODO DEMOSTRACIÓN</small>
+          <small>{isLive ? 'CONECTADO A LA API' : 'CREA TU PRIMER VIDEO'}</small>
           <h2>Crea un clip desde tu idea</h2>
           <label className="video-prompt-label">Describe el movimiento
-            <Textarea value={videoPrompt} onChange={(event) => setVideoPrompt(event.target.value)} maxLength={500} />
+            <Textarea value={videoPrompt} onChange={(event) => setVideoPrompt(event.target.value)} maxLength={2000} />
           </label>
-          <SelectField label="Duración" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos']} />
+          <div className="settings-grid">
+            <SelectField label="Duración" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos']} />
+            <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} />
+          </div>
           <Button type="button" onClick={generateVideo} disabled={!videoPrompt.trim() || generating}>
             {generating ? <><LoaderCircle className="spin" /> Generando...</> : <><Video /> Generar Video · {duration === '10 segundos' ? 20 : 12} créditos</>}
           </Button>
+          {generating && <p className="video-status-note">{statusLabel}</p>}
         </div>
-        <div className={`video-preview-frame ${generated ? 'generated-video' : ''}`}>
-          <img src={media[0]} alt="Vista previa de video" />
-          <span>{generating ? <LoaderCircle className="spin" size={26} /> : generated ? <><Video size={26} /><small>Clip listo</small></> : <Video size={26} />}</span>
+        <div className={`video-preview-frame ${videoUrl ? 'generated-video' : ''}`}>
+          {videoUrl ? (
+            <video src={videoUrl} controls autoPlay loop playsInline />
+          ) : (
+            <img src={media[0]} alt="Vista previa de video" />
+          )}
+          {!videoUrl && (
+            <span>{generating ? <LoaderCircle className="spin" size={26} /> : <Video size={26} />}</span>
+          )}
         </div>
       </section>
     </div>

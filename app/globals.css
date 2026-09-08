@@ -1202,6 +1202,25 @@ button { font-weight: 500; }
 
 .select-field button:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* --- Real video playback --- */
+
+.video-preview-frame video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+.video-preview-frame.generated-video { animation: none; background: #000; }
+.video-preview-frame.generated-video::after { display: none; }
+.video-preview-frame video { position: relative; z-index: 1; }
+.video-status-note {
+  margin: 12px 0 0;
+  color: #b8b1cc;
+  font-size: 13px;
+  line-height: 1.5;
+  animation: floatIn 200ms var(--ease-out) both;
+}
+
 @media (max-width: 560px) {
   .reference-note { margin-left: 0; }
 }
