@@ -424,7 +424,7 @@ export default function HomePage() {
           )}
           {view === 'inicio' && <DashboardView onNavigate={navigate} credits={credits} />}
           {view === 'avatares' && <AvatarsView onNavigate={navigate} plan={plan} onNotify={notify} selectedAvatar={selectedAvatar} onSelectAvatar={setSelectedAvatar} />}
-          {view === 'video' && <VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} />}
+          <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} /></div>
           {view === 'plantillas' && <TemplatesView onUseTemplate={useTemplate} />}
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
           {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 500); notify('Se añadieron 500 créditos de demostración.'); }} />}
@@ -1016,36 +1016,42 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
   const [generating, setGenerating] = useState(false);
   const [statusLabel, setStatusLabel] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
-  const [isLive, setIsLive] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [pendingTask, setPendingTask] = useState<{ id: string; cost: number } | null>(null);
+  const busyRef = useRef(false);
   const cancelRef = useRef(false);
 
-  useEffect(() => () => { cancelRef.current = true; }, []);
+  useEffect(() => { cancelRef.current = false; return () => { cancelRef.current = true; }; }, []);
 
   async function pollVideoTask(taskId: string): Promise<string> {
     for (let attempt = 0; attempt < VIDEO_MAX_POLL_ATTEMPTS; attempt += 1) {
       if (cancelRef.current) throw new Error('cancelled');
       await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_INTERVAL_MS));
-      const response = await fetch(`/api/generate-video?taskId=${taskId}`);
+      if (cancelRef.current) throw new Error('cancelled');
+      const response = await fetch(`/api/generate-video?taskId=${encodeURIComponent(taskId)}`, { cache: 'no-store' });
       const data = (await response.json().catch(() => null)) as { status?: string; url?: string; error?: string } | null;
       if (!response.ok) throw new Error(data?.error ?? 'No se pudo consultar el estado del video.');
       if (data?.status === 'SUCCEEDED' && data.url) return data.url;
-      if (data?.status === 'FAILED') throw new Error(data.error ?? 'La generación de video falló.');
-      setStatusLabel(attempt < 6 ? 'Interpretando tu idea...' : 'Renderizando el clip, puede tardar unos minutos...');
+      if (data?.status === 'FAILED') { setPendingTask(null); throw new Error(data.error ?? 'La generación de video falló.'); }
+      setStatusLabel(data?.status === 'RUNNING' ? 'Creando tu video. Puede tardar unos minutos…' : 'Tu video está en la cola de generación…');
     }
-    throw new Error('El video tardó demasiado en generarse.');
+    throw new Error('Tu video sigue pendiente. Pulsa «Consultar video» para recuperar el resultado sin iniciar otra generación.');
   }
 
   async function generateVideo() {
-    if (!videoPrompt.trim() || generating) return;
-    const cost = duration === '10 segundos' ? 20 : 12;
-    if (credits < cost) {
+    if (busyRef.current || (!pendingTask && videoPrompt.trim().length < 3)) return;
+    const cost = pendingTask?.cost ?? (duration === '10 segundos' ? 20 : 12);
+    if (!pendingTask && credits < cost) {
       onSpendCredits(cost, '');
       return;
     }
+    busyRef.current = true;
     setGenerating(true);
+    setErrorMessage('');
     setStatusLabel('Enviando tu idea...');
-    setVideoUrl('');
     try {
+      let taskId = pendingTask?.id;
+      if (!taskId) {
       const submitResponse = await fetch('/api/generate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1059,14 +1065,20 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
       if (!submitResponse.ok || !submitData?.taskId) {
         throw new Error(submitData?.error ?? 'No se pudo iniciar la generación de video.');
       }
-      const url = await pollVideoTask(submitData.taskId);
+      taskId = submitData.taskId;
+      setPendingTask({ id: taskId, cost });
+      }
+      const url = await pollVideoTask(taskId);
+      if (cancelRef.current) return;
       setVideoUrl(url);
-      setIsLive(true);
+      setPendingTask(null);
       onSpendCredits(cost, 'Video generado correctamente con IA.');
     } catch (error) {
       if (error instanceof Error && error.message === 'cancelled') return;
+      setErrorMessage(error instanceof Error ? error.message : 'No se pudo generar el video. Inténtalo nuevamente.');
       onNotify(error instanceof Error ? error.message : 'No se pudo generar el video. Inténtalo nuevamente.');
     } finally {
+      busyRef.current = false;
       setGenerating(false);
       setStatusLabel('');
     }
@@ -1074,33 +1086,43 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
 
   return (
     <div className="view-stack">
-      <PageHeading eyebrow="ESTUDIO DE VIDEO" title="Generar Video con IA" description="Convierte tus ideas en videos realistas utilizando tus avatares." note="Ideas que se mueven" />
+      <PageHeading eyebrow="ESTUDIO DE VIDEO" title="Generar Video con IA" description="Describe una escena y conviértela en un video con inteligencia artificial." note="Ideas que se mueven" />
       <section className="video-coming-card">
         <div className="video-coming-copy">
           <span><Video size={24} /></span>
-          <small>{isLive ? 'CONECTADO A LA API' : 'CREA TU PRIMER VIDEO'}</small>
+          <small>DE TEXTO A VIDEO · 720P</small>
           <h2>Crea un clip desde tu idea</h2>
-          <label className="video-prompt-label">Describe el movimiento
-            <Textarea value={videoPrompt} onChange={(event) => setVideoPrompt(event.target.value)} maxLength={2000} />
+          <p>Define el personaje, la acción y el movimiento de cámara. Cuantos más detalles, más tuyo será el clip.</p>
+          <fieldset className="video-fields" disabled={generating || !!pendingTask}>
+          <label className="video-prompt-label">Describe tu escena
+            <Textarea value={videoPrompt} onChange={(event) => setVideoPrompt(event.target.value)} minLength={3} maxLength={2000} aria-describedby="video-prompt-help" />
           </label>
+          <div className="video-prompt-help" id="video-prompt-help"><span>Incluye el lugar, la luz y la acción.</span><span>{videoPrompt.length}/2000</span></div>
           <div className="settings-grid">
             <SelectField label="Duración" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos']} />
             <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} />
           </div>
-          <Button type="button" onClick={generateVideo} disabled={!videoPrompt.trim() || generating}>
-            {generating ? <><LoaderCircle className="spin" /> Generando...</> : <><Video /> Generar Video · {duration === '10 segundos' ? 20 : 12} créditos</>}
+          </fieldset>
+          <Button className="video-generate-button" type="button" onClick={generateVideo} disabled={(!pendingTask && videoPrompt.trim().length < 3) || generating}>
+            {generating ? <><LoaderCircle className="spin" /> Creando tu video…</> : pendingTask ? 'Consultar video' : <><Video /> Generar Video · {duration === '10 segundos' ? 20 : 12} créditos</>}
           </Button>
-          {generating && <p className="video-status-note">{statusLabel}</p>}
+          <p className="video-credit-note">Saldo disponible: {credits} créditos · Se descuentan al completar el video.</p>
+          {generating && <p className="video-status-note" role="status">{statusLabel} Puedes visitar otras secciones; mantén esta página abierta.</p>}
+          {errorMessage && <div className="video-error" role="alert">{errorMessage}</div>}
         </div>
+        <div className="video-result">
+        <div className="video-result-heading"><h3>{videoUrl ? 'Tu video está listo' : 'Tu próximo video'}</h3><span>{videoUrl ? 'VIDEO GENERADO' : 'VISTA DE REFERENCIA'}</span></div>
         <div className={`video-preview-frame ${videoUrl ? 'generated-video' : ''}`}>
           {videoUrl ? (
-            <video src={videoUrl} controls autoPlay loop playsInline />
+            <video src={videoUrl} controls playsInline preload="metadata" />
           ) : (
-            <img src={media[0]} alt="Vista previa de video" />
+            <img src={media[0]} alt="Imagen de inspiración; el video se creará a partir de tu descripción" />
           )}
           {!videoUrl && (
             <span>{generating ? <LoaderCircle className="spin" size={26} /> : <Video size={26} />}</span>
           )}
+        </div>
+        {videoUrl ? <div className="video-result-footer"><p>Guarda tu video: el enlace del proveedor es temporal.</p><a href={videoUrl} target="_blank" rel="noopener noreferrer"><Download size={16} /> Abrir y guardar video</a></div> : <p className="video-result-hint">{generating ? 'El resultado aparecerá aquí cuando esté listo.' : 'Esta imagen es inspiración. Tu descripción define el video final.'}</p>}
         </div>
       </section>
     </div>

@@ -1224,3 +1224,24 @@ button { font-weight: 500; }
 @media (max-width: 560px) {
   .reference-note { margin-left: 0; }
 }
+
+/* Video studio: existing violet identity, clear form and playable result. */
+.video-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.video-fields:disabled { opacity: .65; pointer-events: none; }
+.video-coming-card { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: start; box-shadow: none; }
+.video-coming-copy { min-width: 0; }
+.video-coming-copy h2 { letter-spacing: -.03em; }
+.video-prompt-help { display: flex; justify-content: space-between; gap: 12px; margin: -5px 0 20px; color: #626779; font-size: 12px; }
+.video-generate-button { width: 100%; min-height: 44px; }
+.video-coming-copy .video-credit-note { font-size: 12px; margin-top: 10px; }
+.video-error { padding: 14px; margin-top: 16px; border-radius: 8px; background: #fff0ef; color: #9b2828; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.video-result { min-width: 0; padding-top: 22px; }
+.video-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.video-result-heading h3 { font-size: 16px; font-weight: 600; margin: 0; }
+.video-result-heading > span { color: #626779; font-size: 10px; font-weight: 600; }
+.video-result-hint, .video-result-footer p { color: #626779; font-size: 12px; line-height: 1.6; margin-top: 14px; }
+.video-result-footer a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: #6621d7; font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
+.video-result-footer a:focus-visible { outline: 2px solid #6621d7; outline-offset: 4px; }
+@media (max-width: 1100px) { .video-coming-card { grid-template-columns: minmax(0, 1fr); } .video-result { padding: 0 22px 22px; } }
+@media (max-width: 600px) { .video-result { padding: 0 8px 8px; } .video-preview-frame { height: 360px; } .video-result-heading { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .video-coming-card .spin { animation: none; } }

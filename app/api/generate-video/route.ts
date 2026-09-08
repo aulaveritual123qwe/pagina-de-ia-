@@ -18,7 +18,7 @@ const WAN_RATIO_MAP: Record<string, string> = {
 function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 }
 
@@ -50,9 +50,12 @@ export async function POST(request: Request) {
     return json({ error: 'El prompt debe tener entre 3 y 2000 caracteres.' }, 400);
   }
 
-  const ratio = WAN_RATIO_MAP[body?.aspectRatio as string] ?? '9:16';
+  const ratio = body?.aspectRatio === undefined ? '9:16' : WAN_RATIO_MAP[body.aspectRatio as string];
   const rawDuration = typeof body?.duration === 'number' ? body.duration : Number(body?.duration);
-  const duration = [5, 10].includes(rawDuration) ? rawDuration : 5;
+  const duration = body?.duration === undefined ? 5 : rawDuration;
+  if (!ratio || ![5, 10].includes(duration)) {
+    return json({ error: 'Elige un formato válido y una duración de 5 o 10 segundos.' }, 400);
+  }
 
   try {
     const submitResponse = await fetch(WAN_SUBMIT_URL, {
@@ -87,8 +90,8 @@ export async function GET(request: Request) {
   }
 
   const taskId = new URL(request.url).searchParams.get('taskId');
-  if (!taskId) {
-    return json({ error: 'Falta el parámetro taskId.' }, 400);
+  if (!taskId || !/^[a-zA-Z0-9-]{1,100}$/.test(taskId)) {
+    return json({ error: 'El identificador del video no es válido.' }, 400);
   }
 
   try {
@@ -108,10 +111,13 @@ export async function GET(request: Request) {
       }
       return json({ status: 'SUCCEEDED', url: payload.output.video_url });
     }
-    if (status === 'FAILED') {
+    if (status === 'FAILED' || status === 'CANCELED' || status === 'UNKNOWN') {
       return json({ status: 'FAILED', error: payload?.output?.message ?? 'La generación de video falló.' });
     }
-    return json({ status: status ?? 'PENDING' });
+    if (status !== 'PENDING' && status !== 'RUNNING') {
+      return json({ error: 'El proveedor no devolvió un estado válido. Vuelve a consultar el video.' }, 502);
+    }
+    return json({ status });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
   }
