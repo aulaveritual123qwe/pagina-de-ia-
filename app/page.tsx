@@ -1125,10 +1125,15 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
 const VIDEO_POLL_INTERVAL_MS = 5000;
 const VIDEO_MAX_POLL_ATTEMPTS = 60; // up to ~5 minutes
 
+const VIDEO_MODE_OPTIONS = ['Texto a video', 'Imagen a video'];
+
 function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean; onNotify: (message: string) => void }) {
+  const [videoMode, setVideoMode] = useState(VIDEO_MODE_OPTIONS[0]);
   const [videoPrompt, setVideoPrompt] = useState('Lua caminando por una cafetería creativa, movimiento de cámara suave y luz cinematográfica.');
   const [duration, setDuration] = useState('5 segundos');
   const [ratio, setRatio] = useState('9:16');
+  const [refImage, setRefImage] = useState<{ name: string; dataUrl: string } | null>(null);
+  const refImageInput = useRef<HTMLInputElement>(null);
   const [generating, setGenerating] = useState(false);
   const [statusLabel, setStatusLabel] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
@@ -1136,6 +1141,7 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
   const [pendingTask, setPendingTask] = useState<{ id: string; cost: number } | null>(null);
   const busyRef = useRef(false);
   const cancelRef = useRef(false);
+  const isImageMode = videoMode === 'Imagen a video';
 
   useEffect(() => { cancelRef.current = false; return () => { cancelRef.current = true; }; }, []);
 
@@ -1156,6 +1162,10 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
 
   async function generateVideo() {
     if (busyRef.current || (!pendingTask && videoPrompt.trim().length < 3)) return;
+    if (!pendingTask && isImageMode && !refImage) {
+      onNotify('Sube una imagen para animarla con IA.');
+      return;
+    }
     const cost = pendingTask?.cost ?? (duration === '10 segundos' ? 20 : 12);
     if (!pendingTask && credits < cost) {
       onSpendCredits(cost, '');
@@ -1175,6 +1185,8 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
           prompt: videoPrompt,
           aspectRatio: ratio,
           duration: duration === '10 segundos' ? 10 : 5,
+          model: isImageMode ? 'wan-i2v' : 'wan-t2v',
+          referenceImage: isImageMode ? refImage?.dataUrl : undefined,
         }),
       });
       const submitData = (await submitResponse.json().catch(() => null)) as { taskId?: string; error?: string } | null;
@@ -1210,16 +1222,58 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
           <h2>Crea un clip desde tu idea</h2>
           <p>Define el personaje, la acción y el movimiento de cámara. Cuantos más detalles, más tuyo será el clip.</p>
           <fieldset className="video-fields" disabled={generating || !!pendingTask}>
-          <label className="video-prompt-label">Describe tu escena
+          <SegmentedField label="Modo" value={videoMode} onChange={setVideoMode} options={VIDEO_MODE_OPTIONS} />
+          {isImageMode && (
+            <div className="field-block">
+              <span className="field-label">Imagen a animar</span>
+              {refImage ? (
+                <div className="reference-preview">
+                  <img src={refImage.dataUrl} alt="Imagen a animar" />
+                  <div className="reference-preview-copy">
+                    <strong>{refImage.name}</strong>
+                    <small>La IA animará esta imagen según tu descripción</small>
+                  </div>
+                  <button type="button" className="reference-remove" aria-label="Quitar imagen" onClick={() => setRefImage(null)}>
+                    <X size={15} />
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="reference-button" onClick={() => refImageInput.current?.click()}>
+                  <Upload size={16} /> Subir imagen
+                </button>
+              )}
+              <input
+                ref={refImageInput}
+                className="visually-hidden"
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (!file) return;
+                  if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
+                    onNotify('La imagen debe pesar menos de 5 MB.');
+                    return;
+                  }
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    if (typeof reader.result === 'string') setRefImage({ name: file.name, dataUrl: reader.result });
+                  };
+                  reader.readAsDataURL(file);
+                }}
+              />
+            </div>
+          )}
+          <label className="video-prompt-label">Describe {isImageMode ? 'el movimiento' : 'tu escena'}
             <Textarea value={videoPrompt} onChange={(event) => setVideoPrompt(event.target.value)} minLength={3} maxLength={2000} aria-describedby="video-prompt-help" />
           </label>
           <div className="video-prompt-help" id="video-prompt-help"><span>Incluye el lugar, la luz y la acción.</span><span>{videoPrompt.length}/2000</span></div>
           <div className="settings-grid">
             <SelectField label="Duración" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos']} />
-            <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} />
+            <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} disabled={isImageMode} />
           </div>
           </fieldset>
-          <Button className="video-generate-button" type="button" onClick={generateVideo} disabled={(!pendingTask && videoPrompt.trim().length < 3) || generating}>
+          <Button className="video-generate-button" type="button" onClick={generateVideo} disabled={(!pendingTask && (videoPrompt.trim().length < 3 || (isImageMode && !refImage))) || generating}>
             {generating ? <><LoaderCircle className="spin" /> Creando tu video…</> : pendingTask ? 'Consultar video' : <><Video /> Generar Video · {duration === '10 segundos' ? 20 : 12} créditos</>}
           </Button>
           <p className="video-credit-note">Saldo disponible: {credits} créditos · Se descuentan al completar el video.</p>

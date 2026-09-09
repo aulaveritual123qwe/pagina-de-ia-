@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 
 const WAN_SUBMIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis';
 const WAN_TASK_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/tasks';
+const WAN_I2V_MODEL = 'wan2.7-i2v-2026-04-25';
 
 // Wan2.7 accepts ratio directly; map the UI's aspect ratio options to supported values.
 const WAN_RATIO_MAP: Record<string, string> = {
@@ -26,6 +27,8 @@ type SubmitBody = {
   prompt?: unknown;
   aspectRatio?: unknown;
   duration?: unknown;
+  model?: unknown;
+  referenceImage?: unknown;
 };
 
 type WanSubmitResponse = {
@@ -50,12 +53,34 @@ export async function POST(request: Request) {
     return json({ error: 'El prompt debe tener entre 3 y 2000 caracteres.' }, 400);
   }
 
-  const ratio = body?.aspectRatio === undefined ? '9:16' : WAN_RATIO_MAP[body.aspectRatio as string];
   const rawDuration = typeof body?.duration === 'number' ? body.duration : Number(body?.duration);
   const duration = body?.duration === undefined ? 5 : rawDuration;
-  if (!ratio || ![5, 10].includes(duration)) {
-    return json({ error: 'Elige un formato válido y una duración de 5 o 10 segundos.' }, 400);
+  if (![5, 10].includes(duration)) {
+    return json({ error: 'Elige una duración de 5 o 10 segundos.' }, 400);
   }
+
+  const isImageToVideo = body?.model === 'wan-i2v';
+  const referenceImage = typeof body?.referenceImage === 'string' && body.referenceImage.length > 0 ? body.referenceImage : null;
+  if (isImageToVideo && !referenceImage) {
+    return json({ error: 'Sube una imagen para animarla.' }, 400);
+  }
+
+  const ratio = body?.aspectRatio === undefined ? '9:16' : WAN_RATIO_MAP[body.aspectRatio as string];
+  if (!isImageToVideo && !ratio) {
+    return json({ error: 'Elige un formato válido.' }, 400);
+  }
+
+  const requestBody = isImageToVideo
+    ? {
+        model: WAN_I2V_MODEL,
+        input: { prompt, media: [{ type: 'first_frame', url: referenceImage }] },
+        parameters: { resolution: '720P', duration },
+      }
+    : {
+        model: 'wan2.7-t2v',
+        input: { prompt },
+        parameters: { resolution: '720P', ratio, duration },
+      };
 
   try {
     const submitResponse = await fetch(WAN_SUBMIT_URL, {
@@ -65,11 +90,7 @@ export async function POST(request: Request) {
         'Authorization': `Bearer ${apiKey}`,
         'X-DashScope-Async': 'enable',
       },
-      body: JSON.stringify({
-        model: 'wan2.7-t2v',
-        input: { prompt },
-        parameters: { resolution: '720P', ratio, duration },
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const payload = (await submitResponse.json().catch(() => null)) as WanSubmitResponse | null;
