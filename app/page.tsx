@@ -88,10 +88,32 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
 ];
 
 const SESSION_KEY = 'creators-session-email';
-const ONBOARDED_KEY = 'creators-onboarded';
-const CHARACTERS_KEY = 'creators-characters';
+const USERS_KEY = 'creators-users';
+
+function onboardedKey(email: string) { return `creators-onboarded:${email}`; }
+function charactersKey(email: string) { return `creators-characters:${email}`; }
 
 type Character = { id: string; name: string; referenceImage: string; resultImage: string };
+type UserRecord = { name: string; passwordHash: string };
+
+async function hashPassword(password: string): Promise<string> {
+  const bytes = new TextEncoder().encode(password);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function loadUsers(): Record<string, UserRecord> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(USERS_KEY) ?? '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveUsers(users: Record<string, UserRecord>) {
+  window.localStorage.setItem(USERS_KEY, JSON.stringify(users));
+}
 
 function nameFromEmail(email: string) {
   const handle = email.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
@@ -142,16 +164,26 @@ export default function HomePage() {
   );
 
   useEffect(() => {
-    const savedEmail = window.localStorage.getItem(SESSION_KEY) ?? '';
-    setAccountEmail(savedEmail);
-    try {
-      const savedCharacters = JSON.parse(window.localStorage.getItem(CHARACTERS_KEY) ?? '[]');
-      if (Array.isArray(savedCharacters)) setCharacters(savedCharacters);
-    } catch { /* ignore malformed data */ }
-    if (savedEmail && window.localStorage.getItem(ONBOARDED_KEY) !== 'true') {
-      setShowOnboarding(true);
-    }
-    setSessionChecked(true);
+    (async () => {
+      const users = loadUsers();
+      if (!users[ACCOUNT_EMAIL]) {
+        users[ACCOUNT_EMAIL] = { name: 'Admin', passwordHash: await hashPassword(ACCOUNT_PASSWORD) };
+        saveUsers(users);
+      }
+
+      const savedEmail = window.localStorage.getItem(SESSION_KEY) ?? '';
+      setAccountEmail(savedEmail);
+      if (savedEmail) {
+        try {
+          const savedCharacters = JSON.parse(window.localStorage.getItem(charactersKey(savedEmail)) ?? '[]');
+          if (Array.isArray(savedCharacters)) setCharacters(savedCharacters);
+        } catch { /* ignore malformed data */ }
+        if (window.localStorage.getItem(onboardedKey(savedEmail)) !== 'true') {
+          setShowOnboarding(true);
+        }
+      }
+      setSessionChecked(true);
+    })();
   }, []);
 
   function handleLogin(email: string) {
@@ -159,23 +191,29 @@ export default function HomePage() {
     setAccountEmail(email);
     setView('crear');
     notify(`Bienvenido de nuevo, ${nameFromEmail(email).split(' ')[0]}.`);
-    if (window.localStorage.getItem(ONBOARDED_KEY) !== 'true') {
+    try {
+      const savedCharacters = JSON.parse(window.localStorage.getItem(charactersKey(email)) ?? '[]');
+      setCharacters(Array.isArray(savedCharacters) ? savedCharacters : []);
+    } catch {
+      setCharacters([]);
+    }
+    if (window.localStorage.getItem(onboardedKey(email)) !== 'true') {
       setShowOnboarding(true);
     }
   }
 
   function completeOnboarding() {
-    window.localStorage.setItem(ONBOARDED_KEY, 'true');
+    window.localStorage.setItem(onboardedKey(accountEmail), 'true');
     setShowOnboarding(false);
   }
 
   function saveCharacter(character: Character) {
     setCharacters((current) => {
       const next = [...current, character];
-      window.localStorage.setItem(CHARACTERS_KEY, JSON.stringify(next));
+      window.localStorage.setItem(charactersKey(accountEmail), JSON.stringify(next));
       return next;
     });
-    window.localStorage.setItem(ONBOARDED_KEY, 'true');
+    window.localStorage.setItem(onboardedKey(accountEmail), 'true');
     setShowOnboarding(false);
     setSelectedAvatar(character.name);
     notify(`Personaje "${character.name}" creado correctamente.`);
@@ -192,6 +230,7 @@ export default function HomePage() {
     setResultSource('demo');
     setFavorites([]);
     setUploadedImages([]);
+    setCharacters([]);
     setNotice('Cerraste sesión correctamente.');
   }
 
@@ -515,11 +554,15 @@ const ACCOUNT_EMAIL = 'admin@creatorsacademy.pro';
 const ACCOUNT_PASSWORD = 'Creators2026!';
 
 function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; onNotify: (message: string) => void }) {
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const rememberedEmail = window.localStorage.getItem('remembered-email');
@@ -537,10 +580,21 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
     }
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function switchMode(next: 'login' | 'signup') {
+    setMode(next);
+    setError('');
+    setPassword('');
+    setConfirmPassword('');
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
 
+    if (mode === 'signup' && !name.trim()) {
+      setError('Ingresa tu nombre para continuar.');
+      return;
+    }
     if (!cleanEmail || !password) {
       setError('Ingresa tu correo y contraseña para continuar.');
       return;
@@ -553,14 +607,39 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
       setError('Tu contraseña debe tener al menos 6 caracteres.');
       return;
     }
-    if (cleanEmail !== ACCOUNT_EMAIL || password !== ACCOUNT_PASSWORD) {
-      setError('Correo o contraseña incorrectos.');
-      return;
-    }
 
+    setSubmitting(true);
     setError('');
-    persistRememberedEmail(cleanEmail);
-    onLogin(cleanEmail);
+    try {
+      const users = loadUsers();
+
+      if (mode === 'signup') {
+        if (users[cleanEmail]) {
+          setError('Ya existe una cuenta con ese correo. Inicia sesión.');
+          return;
+        }
+        if (password !== confirmPassword) {
+          setError('Las contraseñas no coinciden.');
+          return;
+        }
+        users[cleanEmail] = { name: name.trim(), passwordHash: await hashPassword(password) };
+        saveUsers(users);
+        persistRememberedEmail(cleanEmail);
+        onLogin(cleanEmail);
+        return;
+      }
+
+      const user = users[cleanEmail];
+      const passwordHash = await hashPassword(password);
+      if (!user || user.passwordHash !== passwordHash) {
+        setError('Correo o contraseña incorrectos.');
+        return;
+      }
+      persistRememberedEmail(cleanEmail);
+      onLogin(cleanEmail);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function handleGoogleLogin() {
@@ -581,7 +660,7 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
           <button type="button" onClick={() => onNotify('Ya estás en el inicio.')}>Inicio</button>
           <button type="button" onClick={() => comingSoon('Precios')}>Precios</button>
           <button type="button" onClick={() => comingSoon('El blog')}>Blog</button>
-          <button type="button" className="auth-nav-cta" onClick={() => onNotify('El registro está en modo demostración. Usa “Iniciar sesión” para explorar la plataforma.')}>Crear cuenta</button>
+          <button type="button" className="auth-nav-cta" onClick={() => switchMode('signup')}>Crear cuenta</button>
         </nav>
       </header>
 
@@ -603,15 +682,27 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
 
         <section className="auth-card-wrap">
           <form className="auth-card" onSubmit={handleSubmit}>
-            <h2>Bienvenido de nuevo</h2>
-            <p>Inicia sesión para continuar y seguir creando sin límites.</p>
+            <h2>{mode === 'signup' ? 'Crea tu cuenta' : 'Bienvenido de nuevo'}</h2>
+            <p>{mode === 'signup' ? 'Regístrate para empezar a crear con IA sin límites.' : 'Inicia sesión para continuar y seguir creando sin límites.'}</p>
 
             <button type="button" className="oauth-button" onClick={handleGoogleLogin}>
               <GoogleIcon /> Continuar con Google
             </button>
 
-            <div className="auth-divider"><span>o inicia sesión con tu correo</span></div>
+            <div className="auth-divider"><span>{mode === 'signup' ? 'o regístrate con tu correo' : 'o inicia sesión con tu correo'}</span></div>
 
+            {mode === 'signup' && (
+              <label className="auth-field">
+                <Users size={17} />
+                <input
+                  type="text"
+                  placeholder="Nombre completo"
+                  value={name}
+                  onChange={(event) => { setName(event.target.value); setError(''); }}
+                  autoComplete="name"
+                />
+              </label>
+            )}
             <label className="auth-field">
               <Mail size={17} />
               <input
@@ -629,7 +720,7 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
                 placeholder="Contraseña"
                 value={password}
                 onChange={(event) => { setPassword(event.target.value); setError(''); }}
-                autoComplete="current-password"
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
               />
               <button
                 type="button"
@@ -640,6 +731,18 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
                 {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
               </button>
             </label>
+            {mode === 'signup' && (
+              <label className="auth-field">
+                <Lock size={17} />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Confirmar contraseña"
+                  value={confirmPassword}
+                  onChange={(event) => { setConfirmPassword(event.target.value); setError(''); }}
+                  autoComplete="new-password"
+                />
+              </label>
+            )}
 
             {error && <p className="auth-error" role="alert">{error}</p>}
 
@@ -648,20 +751,23 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
                 <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
                 Recordarme
               </label>
-              <button type="button" onClick={() => onNotify('Revisa tu correo para restablecer tu contraseña (modo demostración).')}>
-                ¿Olvidaste tu contraseña?
-              </button>
+              {mode === 'login' && (
+                <button type="button" onClick={() => onNotify('Revisa tu correo para restablecer tu contraseña (modo demostración).')}>
+                  ¿Olvidaste tu contraseña?
+                </button>
+              )}
             </div>
 
-            <Button type="submit" className="auth-submit">
-              Iniciar sesión <ArrowRight size={18} />
+            <Button type="submit" className="auth-submit" disabled={submitting}>
+              {submitting ? <LoaderCircle className="spin" size={18} /> : <>{mode === 'signup' ? 'Crear cuenta' : 'Iniciar sesión'} <ArrowRight size={18} /></>}
             </Button>
 
             <p className="auth-switch">
-              ¿No tienes cuenta?{' '}
-              <button type="button" onClick={() => onNotify('El registro está en modo demostración. Usa “Iniciar sesión” para explorar la plataforma.')}>
-                Crear cuenta
-              </button>
+              {mode === 'signup' ? (
+                <>¿Ya tienes cuenta?{' '}<button type="button" onClick={() => switchMode('login')}>Iniciar sesión</button></>
+              ) : (
+                <>¿No tienes cuenta?{' '}<button type="button" onClick={() => switchMode('signup')}>Crear cuenta</button></>
+              )}
             </p>
           </form>
         </section>
