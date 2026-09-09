@@ -327,7 +327,7 @@ export default function HomePage() {
       });
       setResults(images);
       setResultSource(source);
-      setCredits((current) => Math.max(0, current - amount));
+      setCredits((current) => Math.max(0, current - amount * IMAGE_CREDIT_COST));
       notify(
         source === 'live'
           ? `${images.length} imagen${images.length === 1 ? '' : 'es'} generada${images.length === 1 ? '' : 's'} con IA.`
@@ -472,7 +472,7 @@ export default function HomePage() {
           <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} /></div>
           {view === 'plantillas' && <TemplatesView onUseTemplate={useTemplate} />}
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
-          {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 500); notify('Se añadieron 500 créditos de demostración.'); }} />}
+          {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 700); notify('Se añadieron 700 créditos (recarga de US$9.90).'); }} />}
           {view === 'ajustes' && (
             <SettingsView
               onNotify={notify}
@@ -1007,13 +1007,13 @@ function CreateView(props: CreateViewProps) {
                     : 'Modo demostración · Añade tu API key para generar imágenes reales'}
               </small>
             </div>
-            <span className="estimated-cost"><Coins size={16} /> {props.imageCount} créditos</span>
+            <span className="estimated-cost"><Coins size={16} /> {Number(props.imageCount) * IMAGE_CREDIT_COST} créditos</span>
           </div>
 
           <Button
             className="generate-button"
             size="lg"
-            disabled={!props.prompt.trim() || props.isGenerating || props.credits < Number(props.imageCount)}
+            disabled={!props.prompt.trim() || props.isGenerating || props.credits < Number(props.imageCount) * IMAGE_CREDIT_COST}
             onClick={props.onGenerate}
           >
             {props.isGenerating ? (
@@ -1185,7 +1185,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
 
   async function handleGenerate() {
     if (!reference || generating) return;
-    const cost = 4;
+    const cost = IMAGE_CREDIT_COST;
     if (credits < cost) {
       setError('No tienes créditos suficientes para crear tu personaje.');
       return;
@@ -1345,6 +1345,16 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
           <Button type="button" onClick={onCreateCharacter}><Sparkles size={16} /> Crear personaje</Button>
         </div>
       </div>
+      {characters.length === 0 && (
+        <button type="button" className="avatar-upload-banner" onClick={onCreateCharacter}>
+          <span className="avatar-upload-icon"><Upload size={22} /></span>
+          <span className="avatar-upload-copy">
+            <strong>Sube las fotos de tu personaje</strong>
+            <small>No subiste imágenes de referencia al crear tu cuenta. Hazlo ahora para generar contenido con tu identidad.</small>
+          </span>
+          <span className="avatar-upload-cta">Subir fotos <ArrowRight size={16} /></span>
+        </button>
+      )}
       <div className="avatar-page-grid">
         {avatars.map((avatar) => (
           <article className={`avatar-card ${selectedAvatar === avatar.name ? 'active-avatar' : ''} ${avatar.premium && plan === 'Free' ? 'locked-avatar' : ''}`} key={avatar.name}>
@@ -1373,6 +1383,14 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
     </div>
   );
 }
+
+// Credit costs — see the "Tabla maestra de créditos" pricing sheet.
+const IMAGE_CREDIT_COST = 15;
+const VIDEO_CREDIT_COST_BY_DURATION: Record<string, number> = {
+  '5 segundos': 120,
+  '10 segundos': 240,
+  '15 segundos': 360,
+};
 
 const VIDEO_POLL_INTERVAL_MS = 5000;
 const VIDEO_MAX_POLL_ATTEMPTS = 60; // up to ~5 minutes
@@ -1418,7 +1436,7 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
       onNotify('Sube una imagen para animarla con IA.');
       return;
     }
-    const cost = pendingTask?.cost ?? (duration === '10 segundos' ? 20 : 12);
+    const cost = pendingTask?.cost ?? VIDEO_CREDIT_COST_BY_DURATION[duration];
     if (!pendingTask && credits < cost) {
       onSpendCredits(cost, '');
       return;
@@ -1436,7 +1454,7 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
         body: JSON.stringify({
           prompt: videoPrompt,
           aspectRatio: ratio,
-          duration: duration === '10 segundos' ? 10 : 5,
+          duration: Number.parseInt(duration, 10),
           model: isImageMode ? 'wan-i2v' : 'wan-t2v',
           referenceImage: isImageMode ? refImage?.dataUrl : undefined,
         }),
@@ -1521,12 +1539,12 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
           </label>
           <div className="video-prompt-help" id="video-prompt-help"><span>Incluye el lugar, la luz y la acción.</span><span>{videoPrompt.length}/2000</span></div>
           <div className="settings-grid">
-            <SelectField label="Duración" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos']} />
+            <SelectField label="Duración" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos', '15 segundos']} />
             <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} disabled={isImageMode} />
           </div>
           </fieldset>
           <Button className="video-generate-button" type="button" onClick={generateVideo} disabled={(!pendingTask && (videoPrompt.trim().length < 3 || (isImageMode && !refImage))) || generating}>
-            {generating ? <><LoaderCircle className="spin" /> Creando tu video…</> : pendingTask ? 'Consultar video' : <><Video /> Generar Video · {duration === '10 segundos' ? 20 : 12} créditos</>}
+            {generating ? <><LoaderCircle className="spin" /> Creando tu video…</> : pendingTask ? 'Consultar video' : <><Video /> Generar Video · {VIDEO_CREDIT_COST_BY_DURATION[duration]} créditos</>}
           </Button>
           <p className="video-credit-note">Saldo disponible: {credits} créditos · Se descuentan al completar el video.</p>
           {generating && <p className="video-status-note" role="status">{statusLabel} Puedes visitar otras secciones; mantén esta página abierta.</p>}
@@ -1614,7 +1632,7 @@ function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string
     <div className="view-stack">
       <PageHeading eyebrow="CRECE A TU RITMO" title="Planes y créditos" description="Elige un plan claro. Sin costos ocultos y con tus créditos siempre visibles." note="Más espacio para crear" />
       <div className="plans-grid">{plans.map((plan) => <article className={`plan-card ${plan.featured ? 'featured' : ''} ${currentPlan === plan.name ? 'current-plan' : ''}`} key={plan.name}>{plan.featured && <span className="popular">Más elegido</span>}<h2>{plan.name}</h2><p>Para creadores {plan.name === 'Inicial' ? 'que están empezando' : 'en crecimiento'}</p><div className="price"><span>US$</span><strong>{plan.price}</strong><small>/ mes</small></div><div className="plan-credits"><Coins size={20} /> <strong>{plan.credits}</strong> créditos al mes</div><ul><li><Check /> Generación de imágenes</li><li><Check /> Descargas en alta calidad</li><li><Check /> Biblioteca personal</li><li><Check /> Uso comercial</li></ul><Button variant={plan.featured ? 'default' : 'secondary'} type="button" onClick={() => onSelectPlan(plan.name, plan.creditAmount)}>{currentPlan === plan.name ? 'Plan actual' : `Elegir ${plan.name}`}</Button></article>)}</div>
-      <section className="topup-banner"><div><Coins /><span><strong>¿Solo necesitas más créditos?</strong><small>Recarga 500 créditos sin cambiar de plan.</small></span></div><Button variant="secondary" type="button" onClick={onTopUp}>Recargar 500 créditos</Button></section>
+      <section className="topup-banner"><div><Coins /><span><strong>¿Solo necesitas más créditos?</strong><small>Recarga 700 créditos por US$9.90 sin cambiar de plan.</small></span></div><Button variant="secondary" type="button" onClick={onTopUp}>Recargar 700 créditos</Button></section>
     </div>
   );
 }

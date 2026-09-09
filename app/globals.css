@@ -1482,3 +1482,47 @@ button { font-weight: 500; }
   .onboarding-actions { flex-direction: column-reverse; align-items: stretch; }
   .onboarding-actions .link-button { text-align: center; }
 }
+
+/* --- "Upload your character" banner (Mis Avatares empty state) --- */
+
+.avatar-upload-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  border: 1.5px dashed rgb(112 39 247 / 30%);
+  border-radius: 14px;
+  background: #faf8ff;
+  text-align: left;
+  transition: border-color 200ms var(--ease-out), background 200ms var(--ease-out);
+}
+.avatar-upload-banner:hover { border-color: #a77cff; background: #f5f1ff; }
+.avatar-upload-icon {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--brand-gradient);
+  color: #fff;
+}
+.avatar-upload-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.avatar-upload-copy strong { font-size: 15px; font-weight: 700; color: #16192a; }
+.avatar-upload-copy small { color: #6a7086; font-size: 12.5px; line-height: 1.5; }
+.avatar-upload-cta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: #5f1fe4;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .avatar-upload-banner { flex-wrap: wrap; }
+  .avatar-upload-cta { width: 100%; justify-content: center; padding-top: 4px; }
+}

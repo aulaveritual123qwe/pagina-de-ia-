@@ -55,8 +55,8 @@ export async function POST(request: Request) {
 
   const rawDuration = typeof body?.duration === 'number' ? body.duration : Number(body?.duration);
   const duration = body?.duration === undefined ? 5 : rawDuration;
-  if (![5, 10].includes(duration)) {
-    return json({ error: 'Elige una duración de 5 o 10 segundos.' }, 400);
+  if (![5, 10, 15].includes(duration)) {
+    return json({ error: 'Elige una duración de 5, 10 o 15 segundos.' }, 400);
   }
 
   const isImageToVideo = body?.model === 'wan-i2v';
