@@ -1526,3 +1526,7 @@ button { font-weight: 500; }
   .avatar-upload-banner { flex-wrap: wrap; }
   .avatar-upload-cta { width: 100%; justify-content: center; padding-top: 4px; }
 }
+
+.special-content-heading { margin-bottom: 24px; }
+.special-content-modes { display: flex; flex-wrap: wrap; gap: 10px; }
+.special-content-modes button { min-height: 44px; padding-inline: 20px; }

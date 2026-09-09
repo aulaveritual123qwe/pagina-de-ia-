@@ -47,7 +47,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { generateImages } from '@/lib/image-provider';
 
-type View = 'inicio' | 'avatares' | 'crear' | 'video' | 'plantillas' | 'biblioteca' | 'planes' | 'ajustes';
+type View = 'inicio' | 'avatares' | 'crear' | 'video' | 'especial' | 'plantillas' | 'biblioteca' | 'planes' | 'ajustes';
 
 type ModelContext = {
   registerTool: (
@@ -81,6 +81,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: 'avatares', label: 'Mis Avatares', icon: Users },
   { id: 'crear', label: 'Crear Imagen', icon: WandSparkles },
   { id: 'video', label: 'Generar Video', icon: Video },
+  { id: 'especial', label: 'Contenido especial', icon: Sparkles },
   { id: 'plantillas', label: 'Plantillas', icon: LayoutTemplate },
   { id: 'biblioteca', label: 'Biblioteca', icon: Library },
   { id: 'planes', label: 'Planes y Créditos', icon: Coins },
@@ -128,6 +129,7 @@ export default function HomePage() {
   const [accountEmail, setAccountEmail] = useState('');
   const [sessionChecked, setSessionChecked] = useState(false);
   const [view, setView] = useState<View>('crear');
+  const [specialMode, setSpecialMode] = useState('Crear imagen');
   const [mobileNav, setMobileNav] = useState(false);
   const [prompt, setPrompt] = useState(
     'Retrato editorial en una cafetería creativa, luz cálida, reflejos violeta, fotografía realista y natural.',
@@ -467,8 +469,21 @@ export default function HomePage() {
         </header>
 
         <main className="content-area" aria-label={activeLabel}>
-          {view === 'crear' && (
+          {view === 'especial' && (
+            <div className="special-content-heading view-stack">
+              <PageHeading eyebrow="ESTUDIO CREATIVO" title="Contenido especial" description="Crea imágenes y genera videos en un solo lugar." note="Imagina · Crea · Comparte" />
+              <div className="special-content-modes" role="group" aria-label="Tipo de contenido">
+                {['Crear imagen', 'Generar video'].map((mode) => (
+                  <Button key={mode} type="button" variant={specialMode === mode ? 'default' : 'outline'} aria-pressed={specialMode === mode} onClick={() => setSpecialMode(mode)}>
+                    {mode === 'Crear imagen' ? <ImageIcon size={18} /> : <Video size={18} />}{mode}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+          {(view === 'crear' || (view === 'especial' && specialMode === 'Crear imagen')) && (
             <CreateView
+              hideHeading={view === 'especial'}
               prompt={prompt}
               setPrompt={setPrompt}
               style={style}
@@ -509,6 +524,7 @@ export default function HomePage() {
             />
           )}
           <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} /></div>
+          <div hidden={view !== 'especial' || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} /></div>
           {view === 'plantillas' && <TemplatesView onUseTemplate={useTemplate} />}
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
           {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 700); notify('Se añadieron 700 créditos (recarga de US$9.90).'); }} />}
@@ -989,7 +1005,7 @@ function SegmentedField({ label, value, onChange, options }: { label: string; va
   );
 }
 
-function CreateView(props: CreateViewProps) {
+function CreateView(props: CreateViewProps & { hideHeading?: boolean }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const referenceInput = useRef<HTMLInputElement>(null);
   const currentImage = props.results[currentIndex] ?? props.results[0] ?? media[0];
@@ -998,12 +1014,12 @@ function CreateView(props: CreateViewProps) {
   useEffect(() => setCurrentIndex(0), [props.results]);
   return (
     <div className="view-stack create-view">
-      <PageHeading
+      {!props.hideHeading && <PageHeading
         eyebrow="ESTUDIO DE IMAGEN"
         title="Crear imagen con IA"
         description="Describe tu idea, elige el estilo y genera una colección lista para usar."
         note="Imagina · Crea · Comparte"
-      />
+      />}
 
       <div className="workspace-grid">
         <section className="creator-panel" aria-label="Configuración de imagen">
@@ -1503,7 +1519,7 @@ const VIDEO_MAX_POLL_ATTEMPTS = 60; // up to ~5 minutes
 
 const VIDEO_MODE_OPTIONS = ['Texto a video', 'Imagen a video'];
 
-function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean; onNotify: (message: string) => void }) {
+function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean; onNotify: (message: string) => void; hideHeading?: boolean }) {
   const [videoMode, setVideoMode] = useState(VIDEO_MODE_OPTIONS[0]);
   const [videoPrompt, setVideoPrompt] = useState('Lua caminando por una cafetería creativa, movimiento de cámara suave y luz cinematográfica.');
   const [duration, setDuration] = useState('5 segundos');
@@ -1590,7 +1606,7 @@ function VideoView({ credits, onSpendCredits, onNotify }: { credits: number; onS
 
   return (
     <div className="view-stack">
-      <PageHeading eyebrow="ESTUDIO DE VIDEO" title="Generar Video con IA" description="Describe una escena y conviértela en un video con inteligencia artificial." note="Ideas que se mueven" />
+      {!hideHeading && <PageHeading eyebrow="ESTUDIO DE VIDEO" title="Generar Video con IA" description="Describe una escena y conviértela en un video con inteligencia artificial." note="Ideas que se mueven" />}
       <section className="video-coming-card">
         <div className="video-coming-copy">
           <span><Video size={24} /></span>
