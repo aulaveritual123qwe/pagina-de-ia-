@@ -33,6 +33,7 @@ import {
   Video,
   WandSparkles,
   X,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -717,6 +718,119 @@ type CreateViewProps = {
 
 const MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024;
 
+const MODEL_OPTIONS: Array<{ value: string; label: string; sublabel: string; icon: typeof Sparkles }> = [
+  { value: 'higgsfield', label: 'Higgsfield', sublabel: 'Fotorealismo', icon: Sparkles },
+  { value: 'qwen', label: 'Qwen', sublabel: 'Edición avanzada', icon: WandSparkles },
+  { value: 'kling', label: 'Kling', sublabel: 'Experimental', icon: Zap },
+];
+
+const RATIO_OPTIONS: Array<{ value: string; label: string; width: number; height: number }> = [
+  { value: '1:1', label: '1:1', width: 16, height: 16 },
+  { value: '4:5', label: '4:5', width: 14, height: 17 },
+  { value: '9:16', label: '9:16', width: 11, height: 19 },
+  { value: '16:9', label: '16:9', width: 19, height: 11 },
+];
+
+function RatioIcon({ width, height }: { width: number; height: number }) {
+  return (
+    <svg width="22" height="20" viewBox="0 0 22 20" aria-hidden="true">
+      <rect
+        x={(22 - width) / 2}
+        y={(20 - height) / 2}
+        width={width}
+        height={height}
+        rx="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+function ModelField({ value, onChange, disabled }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  return (
+    <div className="field-block">
+      <span className="field-label">Modelo</span>
+      <div className="model-picker" role="radiogroup" aria-label="Modelo de generación">
+        {MODEL_OPTIONS.map((option) => {
+          const Icon = option.icon;
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              className={`model-card ${selected ? 'is-selected' : ''}`}
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+            >
+              <span className="model-card-icon"><Icon size={16} /></span>
+              <span className="model-card-copy">
+                <strong>{option.label}</strong>
+                <small>{option.sublabel}</small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RatioField({ value, onChange, disabled }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  return (
+    <div className="field-block">
+      <span className="field-label">Formato</span>
+      <div className="ratio-picker" role="radiogroup" aria-label="Formato de imagen">
+        {RATIO_OPTIONS.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              className={`ratio-chip ${selected ? 'is-selected' : ''}`}
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+            >
+              <RatioIcon width={option.width} height={option.height} />
+              <small>{option.label}</small>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SegmentedField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
+  return (
+    <div className="field-block">
+      <span className="field-label">{label}</span>
+      <div className="segmented-control" role="radiogroup" aria-label={label}>
+        {options.map((option) => {
+          const selected = option === value;
+          return (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              className={`segmented-option ${selected ? 'is-selected' : ''}`}
+              onClick={() => onChange(option)}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CreateView(props: CreateViewProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const referenceInput = useRef<HTMLInputElement>(null);
@@ -813,12 +927,14 @@ function CreateView(props: CreateViewProps) {
           </Step>
 
           <Step title="Ajustes de imagen" number="3">
+            <ModelField value={props.model} onChange={props.setModel} disabled={Boolean(props.referenceImage)} />
             <div className="settings-grid">
-              <SelectField label="Modelo" value={props.model} onChange={props.setModel} options={['higgsfield', 'qwen', 'kling']} disabled={Boolean(props.referenceImage)} />
               <SelectField label="Estilo" value={props.style} onChange={props.setStyle} options={['Realista', 'Editorial', 'Cinematográfico', 'Ilustración']} />
-              <SelectField label="Formato" value={props.ratio} onChange={props.setRatio} options={['1:1', '4:5', '9:16', '16:9']} disabled={Boolean(props.referenceImage)} />
-              <SelectField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />
-              <SelectField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} suffix=" imágenes" />
+              <SegmentedField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />
+            </div>
+            <div className="settings-grid">
+              <RatioField value={props.ratio} onChange={props.setRatio} disabled={Boolean(props.referenceImage)} />
+              <SegmentedField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} />
             </div>
             {props.referenceImage && (
               <p className="reference-note">Usando <strong>Qwen Image Edit</strong> para transformar tu imagen de referencia — el modelo y formato no aplican en este modo.</p>
