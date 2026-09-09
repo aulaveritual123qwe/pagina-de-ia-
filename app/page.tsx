@@ -88,6 +88,10 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
 ];
 
 const SESSION_KEY = 'creators-session-email';
+const ONBOARDED_KEY = 'creators-onboarded';
+const CHARACTERS_KEY = 'creators-characters';
+
+type Character = { id: string; name: string; referenceImage: string; resultImage: string };
 
 function nameFromEmail(email: string) {
   const handle = email.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
@@ -126,6 +130,8 @@ export default function HomePage() {
   const [profileName, setProfileName] = useState('');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [referenceImage, setReferenceImage] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const authenticated = Boolean(accountEmail);
   const displayName = profileName || (accountEmail ? nameFromEmail(accountEmail) : '');
@@ -136,7 +142,15 @@ export default function HomePage() {
   );
 
   useEffect(() => {
-    setAccountEmail(window.localStorage.getItem(SESSION_KEY) ?? '');
+    const savedEmail = window.localStorage.getItem(SESSION_KEY) ?? '';
+    setAccountEmail(savedEmail);
+    try {
+      const savedCharacters = JSON.parse(window.localStorage.getItem(CHARACTERS_KEY) ?? '[]');
+      if (Array.isArray(savedCharacters)) setCharacters(savedCharacters);
+    } catch { /* ignore malformed data */ }
+    if (savedEmail && window.localStorage.getItem(ONBOARDED_KEY) !== 'true') {
+      setShowOnboarding(true);
+    }
     setSessionChecked(true);
   }, []);
 
@@ -145,6 +159,26 @@ export default function HomePage() {
     setAccountEmail(email);
     setView('crear');
     notify(`Bienvenido de nuevo, ${nameFromEmail(email).split(' ')[0]}.`);
+    if (window.localStorage.getItem(ONBOARDED_KEY) !== 'true') {
+      setShowOnboarding(true);
+    }
+  }
+
+  function completeOnboarding() {
+    window.localStorage.setItem(ONBOARDED_KEY, 'true');
+    setShowOnboarding(false);
+  }
+
+  function saveCharacter(character: Character) {
+    setCharacters((current) => {
+      const next = [...current, character];
+      window.localStorage.setItem(CHARACTERS_KEY, JSON.stringify(next));
+      return next;
+    });
+    window.localStorage.setItem(ONBOARDED_KEY, 'true');
+    setShowOnboarding(false);
+    setSelectedAvatar(character.name);
+    notify(`Personaje "${character.name}" creado correctamente.`);
   }
 
   function handleLogout() {
@@ -424,7 +458,17 @@ export default function HomePage() {
             />
           )}
           {view === 'inicio' && <DashboardView onNavigate={navigate} credits={credits} />}
-          {view === 'avatares' && <AvatarsView onNavigate={navigate} plan={plan} onNotify={notify} selectedAvatar={selectedAvatar} onSelectAvatar={setSelectedAvatar} />}
+          {view === 'avatares' && (
+            <AvatarsView
+              onNavigate={navigate}
+              plan={plan}
+              onNotify={notify}
+              selectedAvatar={selectedAvatar}
+              onSelectAvatar={setSelectedAvatar}
+              characters={characters}
+              onCreateCharacter={() => setShowOnboarding(true)}
+            />
+          )}
           <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} /></div>
           {view === 'plantillas' && <TemplatesView onUseTemplate={useTemplate} />}
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
@@ -441,6 +485,14 @@ export default function HomePage() {
         </main>
       </div>
       {notice && <div className="app-notice" role="status"><Check size={18} /> {notice}</div>}
+      {showOnboarding && (
+        <CharacterOnboarding
+          credits={credits}
+          onSpendCredits={spendCredits}
+          onCreated={saveCharacter}
+          onSkip={completeOnboarding}
+        />
+      )}
     </div>
   );
 }
@@ -1082,8 +1134,202 @@ function QuickCard({ icon: Icon, title, copy, tone, onClick }: { icon: typeof Ho
   return <button className={`quick-card ${tone}`} type="button" onClick={onClick}><span><Icon size={24} /></span><div><strong>{title}</strong><small>{copy}</small></div><span className="quick-arrow">→</span></button>;
 }
 
-function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvatar }: { onNavigate: (view: View) => void; plan: string; onNotify: (message: string) => void; selectedAvatar: string; onSelectAvatar: (name: string) => void }) {
+const ANALYSIS_TRAITS = ['Rasgos faciales', 'Cabello', 'Piel', 'Tipo de cuerpo', 'Estilo'];
+
+function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
+  credits: number;
+  onSpendCredits: (amount: number, message: string) => boolean;
+  onCreated: (character: Character) => void;
+  onSkip: () => void;
+}) {
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [reference, setReference] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [checkedTraits, setCheckedTraits] = useState(0);
+  const [name, setName] = useState('Mi personaje');
+  const [prompt, setPrompt] = useState('Misma persona, en una cafetería, usando un vestido negro, mirando a la cámara, estilo fotografía profesional.');
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+  const [resultImage, setResultImage] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (step !== 2) return;
+    setCheckedTraits(0);
+    const interval = window.setInterval(() => {
+      setCheckedTraits((current) => {
+        if (current >= ANALYSIS_TRAITS.length - 1) {
+          window.clearInterval(interval);
+          window.setTimeout(() => setStep(3), 500);
+          return ANALYSIS_TRAITS.length;
+        }
+        return current + 1;
+      });
+    }, 450);
+    return () => window.clearInterval(interval);
+  }, [step]);
+
+  function handleFile(file: File) {
+    if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
+      setError('La imagen debe pesar menos de 5 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setReference({ name: file.name, dataUrl: reader.result });
+        setError('');
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleGenerate() {
+    if (!reference || generating) return;
+    const cost = 4;
+    if (credits < cost) {
+      setError('No tienes créditos suficientes para crear tu personaje.');
+      return;
+    }
+    setGenerating(true);
+    setError('');
+    try {
+      const response = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          style: 'Realista',
+          aspectRatio: '4:5',
+          quality: 'Alta',
+          count: 1,
+          model: 'higgsfield',
+          referenceImage: reference.dataUrl,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as { images?: string[]; error?: string } | null;
+      if (!response.ok || !data?.images?.length) {
+        throw new Error(data?.error ?? 'No se pudo crear tu personaje. Inténtalo de nuevo.');
+      }
+      onSpendCredits(cost, '');
+      setResultImage(data.images[0]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo crear tu personaje. Inténtalo de nuevo.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function handleSave() {
+    if (!reference || !resultImage) return;
+    onCreated({ id: crypto.randomUUID(), name: name.trim() || 'Mi personaje', referenceImage: reference.dataUrl, resultImage });
+  }
+
+  return (
+    <div className="onboarding-overlay" role="dialog" aria-modal="true" aria-label="Crear tu personaje con IA">
+      <div className="onboarding-card">
+        <button type="button" className="onboarding-close" aria-label="Omitir por ahora" onClick={onSkip}><X size={18} /></button>
+        <div className="onboarding-steps">
+          {[1, 2, 3, 4].map((n) => <span key={n} className={`onboarding-dot ${step >= n ? 'is-done' : ''}`} />)}
+        </div>
+
+        {step === 1 && (
+          <div className="onboarding-step">
+            <span className="onboarding-eyebrow">PASO 1</span>
+            <h2>Sube una foto de referencia</h2>
+            <p>Usa una foto clara de tu rostro y cuerpo. La IA aprenderá tus rasgos para generar nuevas imágenes con la misma identidad.</p>
+            {reference ? (
+              <div className="onboarding-preview">
+                <img src={reference.dataUrl} alt="Referencia" />
+                <button type="button" className="reference-remove" aria-label="Quitar imagen" onClick={() => setReference(null)}><X size={15} /></button>
+              </div>
+            ) : (
+              <button type="button" className="onboarding-upload" onClick={() => fileInputRef.current?.click()}>
+                <Upload size={22} /> Subir foto
+              </button>
+            )}
+            <input
+              ref={fileInputRef}
+              className="visually-hidden"
+              type="file"
+              accept="image/*"
+              onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) handleFile(file); }}
+            />
+            {error && <p className="onboarding-error">{error}</p>}
+            <div className="onboarding-actions">
+              <button type="button" className="link-button" onClick={onSkip}>Omitir por ahora</button>
+              <Button type="button" disabled={!reference} onClick={() => setStep(2)}>Continuar <ArrowRight size={16} /></Button>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="onboarding-step">
+            <span className="onboarding-eyebrow">PASO 2</span>
+            <h2>La IA analiza y aprende</h2>
+            <p>Extrayendo las características clave de tu personaje...</p>
+            <ul className="onboarding-traits">
+              {ANALYSIS_TRAITS.map((trait, index) => (
+                <li key={trait} className={index < checkedTraits ? 'is-checked' : ''}>
+                  <span>{index < checkedTraits ? <Check size={14} /> : <LoaderCircle size={14} className="spin" />}</span>
+                  {trait}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="onboarding-step">
+            <span className="onboarding-eyebrow">PASO 3</span>
+            <h2>Describe tu escena</h2>
+            <p>Escribe el escenario, pose, outfit o estilo que quieres para tu personaje.</p>
+            <label className="onboarding-field">Nombre del personaje
+              <input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} />
+            </label>
+            <label className="onboarding-field">Prompt
+              <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={500} />
+            </label>
+            <div className="onboarding-actions">
+              <button type="button" className="link-button" onClick={onSkip}>Omitir por ahora</button>
+              <Button type="button" disabled={prompt.trim().length < 3} onClick={() => { setStep(4); handleGenerate(); }}>
+                <Sparkles size={16} /> Generar
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="onboarding-step">
+            <span className="onboarding-eyebrow">PASO 4</span>
+            <h2>{resultImage ? 'Tu personaje está listo' : 'Generando tu primera imagen'}</h2>
+            {!resultImage && !error && <p>Manteniendo la misma identidad en una nueva escena. Puede tardar un momento...</p>}
+            <div className="onboarding-result">
+              {generating && <LoaderCircle className="spin" size={32} />}
+              {resultImage && <img src={resultImage} alt="Personaje generado" />}
+            </div>
+            {error && <p className="onboarding-error">{error}</p>}
+            <div className="onboarding-actions">
+              {error ? (
+                <>
+                  <button type="button" className="link-button" onClick={onSkip}>Omitir por ahora</button>
+                  <Button type="button" onClick={handleGenerate}>Reintentar</Button>
+                </>
+              ) : resultImage ? (
+                <Button type="button" onClick={handleSave}><Check size={16} /> Guardar personaje</Button>
+              ) : (
+                <button type="button" className="link-button" onClick={onSkip}>Omitir por ahora</button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvatar, characters, onCreateCharacter }: { onNavigate: (view: View) => void; plan: string; onNotify: (message: string) => void; selectedAvatar: string; onSelectAvatar: (name: string) => void; characters: Character[]; onCreateCharacter: () => void }) {
   const avatars = [
+    ...characters.map((character) => ({ name: character.name, detail: 'Tu personaje · Creado con IA', image: character.resultImage, premium: false })),
     { name: 'Lua', detail: 'Principal · Realista', image: media[1], premium: false },
     { name: 'Lua Beach', detail: 'Lifestyle · Verano', image: media[2], premium: true },
     { name: 'Lua Studio', detail: 'Editorial · Interior', image: media[3], premium: true },
@@ -1094,7 +1340,10 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
       <PageHeading eyebrow="TUS PERSONAJES" title="Mis Avatares" description="Gestiona y utiliza tus personajes creados con IA." note="Personajes que dan vida a tus ideas" />
       <div className="avatar-page-toolbar">
         <div><strong>Estás en el plan {plan}</strong><span>{plan === 'Free' ? 'Puedes tener 1 avatar activo. Mejora a Pro para desbloquear hasta 3.' : 'Tienes acceso a todos tus avatares.'}</span></div>
-        <Button type="button" onClick={() => onNavigate('planes')}>{plan === 'Free' ? 'Mejorar a Pro' : 'Gestionar plan'}</Button>
+        <div className="avatar-page-toolbar-actions">
+          <button type="button" className="link-button" onClick={() => onNavigate('planes')}>{plan === 'Free' ? 'Mejorar a Pro' : 'Gestionar plan'}</button>
+          <Button type="button" onClick={onCreateCharacter}><Sparkles size={16} /> Crear personaje</Button>
+        </div>
       </div>
       <div className="avatar-page-grid">
         {avatars.map((avatar) => (
