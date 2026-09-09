@@ -927,17 +927,20 @@ function CreateView(props: CreateViewProps) {
           </Step>
 
           <Step title="Ajustes de imagen" number="3">
-            <ModelField value={props.model} onChange={props.setModel} disabled={Boolean(props.referenceImage)} />
+            <ModelField value={props.model} onChange={props.setModel} />
             <div className="settings-grid">
               <SelectField label="Estilo" value={props.style} onChange={props.setStyle} options={['Realista', 'Editorial', 'Cinematográfico', 'Ilustración']} />
               <SegmentedField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />
             </div>
             <div className="settings-grid">
-              <RatioField value={props.ratio} onChange={props.setRatio} disabled={Boolean(props.referenceImage)} />
+              <RatioField value={props.ratio} onChange={props.setRatio} disabled={Boolean(props.referenceImage) && props.model !== 'higgsfield'} />
               <SegmentedField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} />
             </div>
-            {props.referenceImage && (
-              <p className="reference-note">Usando <strong>Qwen Image Edit</strong> para transformar tu imagen de referencia — el modelo y formato no aplican en este modo.</p>
+            {props.referenceImage && props.model === 'higgsfield' && (
+              <p className="reference-note">Usando <strong>Higgsfield Soul</strong> para generar una nueva imagen manteniendo el parecido de tu referencia.</p>
+            )}
+            {props.referenceImage && props.model !== 'higgsfield' && (
+              <p className="reference-note">Usando <strong>Qwen Image Edit</strong> para transformar tu imagen de referencia — el formato no aplica en este modo.</p>
             )}
           </Step>
 

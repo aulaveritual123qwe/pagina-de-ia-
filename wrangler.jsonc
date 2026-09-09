@@ -15,5 +15,11 @@
     "enabled": true
   }
 ,
-  "version_metadata": { "binding": "CF_VERSION_METADATA" }
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "kv_namespaces": [
+    {
+      "binding": "IMAGE_CACHE",
+      "id": "669f2d8d127c4f228e61439717d1a8d1"
+    }
+  ]
 }

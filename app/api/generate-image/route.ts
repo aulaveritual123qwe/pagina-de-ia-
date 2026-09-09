@@ -1,4 +1,27 @@
+import { env } from 'cloudflare:workers';
+
 export const dynamic = 'force-dynamic';
+
+type KVNamespaceLike = {
+  put: (key: string, value: ArrayBuffer, options?: { expirationTtl?: number; metadata?: Record<string, unknown> }) => Promise<void>;
+};
+
+// Higgsfield's soul/reference endpoint requires a real public URL (max 2083 chars),
+// unlike Qwen which accepts data: URIs directly. Stash the upload in KV and hand
+// back a URL this Worker serves at /api/image/[id].
+async function publishReferenceImage(dataUrl: string, origin: string): Promise<string> {
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
+  if (!match) throw new Error('Formato de imagen de referencia inválido.');
+  const [, mimeType, base64] = match;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+
+  const id = crypto.randomUUID();
+  const kv = (env as unknown as { IMAGE_CACHE: KVNamespaceLike }).IMAGE_CACHE;
+  await kv.put(id, bytes.buffer as ArrayBuffer, { expirationTtl: 3600, metadata: { mimeType } });
+  return `${origin}/api/image/${id}`;
+}
 
 type GenerateImageBody = {
   prompt?: unknown;
@@ -35,6 +58,8 @@ const KLING_SIZE_MAP: Record<string, string> = {
 };
 
 const HIGGSFIELD_SUBMIT_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard';
+// Character-consistent generation from a single reference photo (needs a real public URL, no data: URIs).
+const HIGGSFIELD_REFERENCE_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/reference';
 // International (Singapore) DashScope endpoint — pay-as-you-go key (sk-ws-...), not the Token Plan key.
 const QWEN_SUBMIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
 const QWEN_TASK_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/tasks';
@@ -70,29 +95,11 @@ type HiggsfieldStatusResponse = {
   error?: string;
 };
 
-async function generateOneImageHiggsfield(
-  authHeader: string,
-  prompt: string,
-  aspectRatio: string,
-): Promise<string> {
-  const submitResponse = await fetch(HIGGSFIELD_SUBMIT_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: authHeader,
-    },
-    body: JSON.stringify({ prompt, aspect_ratio: aspectRatio, image_url: '' }),
-  });
-
-  const submitPayload = (await submitResponse.json().catch(() => null)) as HiggsfieldSubmitResponse | null;
-  if (!submitResponse.ok || !submitPayload?.status_url) {
-    throw new Error(submitPayload?.error ?? `Higgsfield respondió con estado ${submitResponse.status}.`);
-  }
-
+async function pollHiggsfieldTask(statusUrl: string, authHeader: string): Promise<string> {
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
     await sleep(POLL_INTERVAL_MS);
 
-    const statusResponse = await fetch(submitPayload.status_url, {
+    const statusResponse = await fetch(statusUrl, {
       headers: { Authorization: authHeader },
     });
     const statusPayload = (await statusResponse.json().catch(() => null)) as HiggsfieldStatusResponse | null;
@@ -113,6 +120,52 @@ async function generateOneImageHiggsfield(
   }
 
   throw new Error('Higgsfield tardó demasiado.');
+}
+
+async function generateOneImageHiggsfield(
+  authHeader: string,
+  prompt: string,
+  aspectRatio: string,
+): Promise<string> {
+  const submitResponse = await fetch(HIGGSFIELD_SUBMIT_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: authHeader,
+    },
+    body: JSON.stringify({ prompt, aspect_ratio: aspectRatio, image_url: '' }),
+  });
+
+  const submitPayload = (await submitResponse.json().catch(() => null)) as HiggsfieldSubmitResponse | null;
+  if (!submitResponse.ok || !submitPayload?.status_url) {
+    throw new Error(submitPayload?.error ?? `Higgsfield respondió con estado ${submitResponse.status}.`);
+  }
+
+  return pollHiggsfieldTask(submitPayload.status_url, authHeader);
+}
+
+// Character-consistent generation: keeps the person's likeness from a reference photo.
+async function generateOneImageHiggsfieldReference(
+  authHeader: string,
+  prompt: string,
+  aspectRatio: string,
+  imageReferenceUrl: string,
+): Promise<string> {
+  const submitResponse = await fetch(HIGGSFIELD_REFERENCE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: authHeader,
+    },
+    body: JSON.stringify({ prompt, image_reference_url: imageReferenceUrl, aspect_ratio: aspectRatio }),
+  });
+
+  const submitPayload = (await submitResponse.json().catch(() => null)) as HiggsfieldSubmitResponse | null;
+  if (!submitResponse.ok || !submitPayload?.status_url) {
+    throw new Error(submitPayload?.error ?? `Higgsfield respondió con estado ${submitResponse.status}.`);
+  }
+
+  return pollHiggsfieldTask(submitPayload.status_url, authHeader);
 }
 
 // ===== Qwen-Image (Alibaba Model Studio, DashScope international) =====
@@ -295,7 +348,30 @@ export async function POST(request: Request) {
   const referenceImage = typeof body?.referenceImage === 'string' && body.referenceImage.length > 0 ? body.referenceImage : null;
 
   try {
-    // A reference image is edited in place — only Qwen-Image-Edit supports this today.
+    if (referenceImage && model === 'higgsfield') {
+      const apiKey = process.env.HIGGSFIELD_API_KEY;
+      if (!apiKey) {
+        return json({ error: 'HIGGSFIELD_API_KEY no está configurada.' }, 501);
+      }
+      const authHeader = `Key ${apiKey}`;
+      const higgsfieldRatio = HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1';
+      const fullPrompt = `${style}: ${prompt}`;
+      const referenceUrl = await publishReferenceImage(referenceImage, new URL(request.url).origin);
+      const results = await Promise.allSettled(
+        Array.from({ length: count }, () => generateOneImageHiggsfieldReference(authHeader, fullPrompt, higgsfieldRatio, referenceUrl)),
+      );
+      const images = results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      if (!images.length) {
+        const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo generar la imagen.';
+        return json({ error: message }, 502);
+      }
+      return json({ images });
+    }
+
+    // A reference image is edited in place — Qwen-Image-Edit is the fallback for any other model.
     if (referenceImage) {
       const apiKey = process.env.QWEN_API_KEY;
       if (!apiKey) {
