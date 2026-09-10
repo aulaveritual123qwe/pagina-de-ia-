@@ -561,7 +561,6 @@ export default function HomePage() {
         </main>
       </div>
       {notice && <div className="app-notice" role="status"><Check size={18} /> {notice}</div>}
-      {isGenerating && <div className="image-loading-screen" role="status" aria-live="polite"><LoaderCircle className="spin" size={40} /><h2>Creando tus imágenes</h2><p>Preparando tu escena en formato {ratio}. Mantén esta página abierta.</p></div>}
       {showOnboarding && (
         <CharacterOnboarding
           credits={credits}

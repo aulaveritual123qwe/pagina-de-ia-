@@ -330,9 +330,23 @@ export async function POST(request: Request) {
   const requestedModel = typeof body?.model === 'string' ? body.model : 'higgsfield';
   const model = ['higgsfield', 'qwen', 'kling'].includes(requestedModel) ? requestedModel : 'higgsfield';
   const aspectRatio = body?.aspectRatio as string;
+  const quality = typeof body?.quality === 'string' ? body.quality : 'Alta';
   const rawCount = typeof body?.count === 'number' ? body.count : Number(body?.count);
   const count = [1, 2, 4].includes(rawCount) ? rawCount : 1;
   const referenceImage = typeof body?.referenceImage === 'string' && body.referenceImage.length > 0 ? body.referenceImage : null;
+
+  // Quality has no dedicated parameter on these providers' basic endpoints, so it's
+  // expressed as a prompt descriptor — the most portable way to influence output
+  // quality across Higgsfield, Qwen, and Kling alike.
+  const QUALITY_DESCRIPTOR: Record<string, string> = {
+    'Estándar': 'standard quality',
+    'Alta': 'high quality, sharp detail',
+    'Ultra': 'ultra high quality, 8k, extremely detailed, professional photography',
+  };
+  const qualityDescriptor = QUALITY_DESCRIPTOR[quality] ?? QUALITY_DESCRIPTOR['Alta'];
+  function buildPrompt(text: string) {
+    return `${style}, ${qualityDescriptor}: ${text}`;
+  }
 
   try {
     if (body?.soulId) {
@@ -352,7 +366,7 @@ export async function POST(request: Request) {
     if (referenceImage && model === 'qwen') {
       const apiKey = process.env.QWEN_API_KEY;
       if (!apiKey) return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
-      const fullPrompt = `${style}: ${prompt}`;
+      const fullPrompt = buildPrompt(prompt);
       const size = QWEN_SIZE_MAP[aspectRatio] ?? '1024*1024';
       const results = await Promise.allSettled(
         Array.from({ length: count }, () => editOneImageQwen(apiKey, referenceImage, fullPrompt, size)),
@@ -383,7 +397,7 @@ export async function POST(request: Request) {
       }
       const authHeader = `Key ${apiKey}`;
       const higgsfieldRatio = HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1';
-      const fullPrompt = `${style}: ${prompt}`;
+      const fullPrompt = buildPrompt(prompt);
       const referenceUrl = await publishReferenceImage(referenceImage, new URL(request.url).origin);
       const results = await Promise.allSettled(
         Array.from({ length: count }, () => generateOneImageHiggsfieldReference(authHeader, fullPrompt, higgsfieldRatio, referenceUrl)),
@@ -403,7 +417,7 @@ export async function POST(request: Request) {
       const apiKey = process.env.QWEN_API_KEY;
       if (!apiKey) return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
       const size = QWEN_SIZE_MAP[aspectRatio] ?? '1024*1024';
-      const fullPrompt = `${style}: ${prompt}`;
+      const fullPrompt = buildPrompt(prompt);
       const results = await Promise.allSettled(
         Array.from({ length: count }, () => generateOneImageQwen(apiKey, fullPrompt, size)),
       );
@@ -422,7 +436,7 @@ export async function POST(request: Request) {
       const apiKey = process.env.KLING_API_KEY;
       if (!apiKey) return json({ error: 'KLING_API_KEY no está configurada.' }, 501);
       const size = KLING_SIZE_MAP[aspectRatio] ?? '1024x1024';
-      const fullPrompt = `${style}: ${prompt}`;
+      const fullPrompt = buildPrompt(prompt);
       const results = await Promise.allSettled(
         Array.from({ length: count }, () => generateOneImageKling(apiKey, fullPrompt, size)),
       );
@@ -444,7 +458,7 @@ export async function POST(request: Request) {
     }
     const higgsfieldRatio = HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1';
     const authHeader = `Key ${apiKey}`;
-    const fullPrompt = `${style}: ${prompt}`;
+    const fullPrompt = buildPrompt(prompt);
     const results = await Promise.allSettled(
       Array.from({ length: count }, () => generateOneImageHiggsfield(authHeader, fullPrompt, higgsfieldRatio)),
     );
