@@ -109,7 +109,7 @@ async function submitHiggsfield(endpoint: string, authHeader: string, payload: R
   });
   const data = (await response.json().catch(() => null)) as HiggsfieldSubmitResponse | null;
   if (!response.ok || !data?.status_url) {
-    throw new Error(data?.error ?? `Higgsfield respondió con estado ${response.status}.`);
+    throw new Error(describeProviderError(data?.error, `Higgsfield respondió con estado ${response.status}.`));
   }
   return { kind: 'higgsfield', ref: data.status_url };
 }
@@ -122,7 +122,7 @@ async function submitQwen(apiKey: string, prompt: string, size: string): Promise
   });
   const data = (await response.json().catch(() => null)) as QwenSubmitResponse | null;
   if (!response.ok || !data?.output?.task_id) {
-    throw new Error(data?.message ?? `Qwen respondió con estado ${response.status}.`);
+    throw new Error(describeProviderError(data?.message, `Qwen respondió con estado ${response.status}.`));
   }
   return { kind: 'qwen', ref: data.output.task_id };
 }
@@ -135,9 +135,18 @@ async function submitKling(apiKey: string, prompt: string, size: string): Promis
   });
   const data = (await response.json().catch(() => null)) as KlingResponse | null;
   if (!response.ok || !data?.data?.task_id) {
-    throw new Error(data?.message ?? `Kling respondió con estado ${response.status}.`);
+    throw new Error(describeProviderError(data?.message, `Kling respondió con estado ${response.status}.`));
   }
   return { kind: 'kling', ref: data.data.task_id };
+}
+
+// Providers reject prompts and reference images that fail their content policy. Their
+// raw messages are English and link to internal docs, so they're restated in Spanish.
+function describeProviderError(message: string | undefined, fallback: string): string {
+  if (message && /inappropriate|sensitive|policy|moderation|nsfw|violation/i.test(message)) {
+    return 'El proveedor rechazó esta generación por su política de contenido. Revisa el texto del prompt y la imagen de referencia, y vuelve a intentarlo con otro contenido.';
+  }
+  return message ?? fallback;
 }
 
 // One status check per still-pending task: at most `count` subrequests per poll.
@@ -148,35 +157,35 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       const apiKey = process.env.HIGGSFIELD_API_KEY;
       const response = await fetch(task.ref, { headers: { Authorization: `Key ${apiKey}` } });
       const data = (await response.json().catch(() => null)) as HiggsfieldStatusResponse | null;
-      if (!response.ok) return { ...task, error: data?.error ?? `Higgsfield respondió ${response.status}.` };
+      if (!response.ok) return { ...task, error: describeProviderError(data?.error, `Higgsfield respondió ${response.status}.`) };
       if (data?.status === 'completed') {
         const url = data.images?.[0]?.url;
         return url ? { ...task, url } : { ...task, error: 'Higgsfield completó sin devolver imagen.' };
       }
-      if (data?.status === 'failed') return { ...task, error: data.error ?? 'Higgsfield falló al generar la imagen.' };
+      if (data?.status === 'failed') return { ...task, error: describeProviderError(data.error, 'Higgsfield falló al generar la imagen.') };
       return task;
     }
     if (task.kind === 'qwen') {
       const apiKey = process.env.QWEN_API_KEY;
       const response = await fetch(`${QWEN_TASK_URL}/${task.ref}`, { headers: { Authorization: `Bearer ${apiKey}` } });
       const data = (await response.json().catch(() => null)) as QwenTaskResponse | null;
-      if (!response.ok) return { ...task, error: data?.message ?? `Qwen respondió ${response.status}.` };
+      if (!response.ok) return { ...task, error: describeProviderError(data?.message, `Qwen respondió ${response.status}.`) };
       if (data?.output?.task_status === 'SUCCEEDED') {
         const url = data.output.results?.[0]?.url;
         return url ? { ...task, url } : { ...task, error: 'Qwen completó sin devolver imagen.' };
       }
-      if (data?.output?.task_status === 'FAILED') return { ...task, error: data.message ?? 'Qwen falló al generar la imagen.' };
+      if (data?.output?.task_status === 'FAILED') return { ...task, error: describeProviderError(data.message, 'Qwen falló al generar la imagen.') };
       return task;
     }
     const apiKey = process.env.KLING_API_KEY;
     const response = await fetch(`${KLING_API_URL}?task_id=${task.ref}`, { headers: { Authorization: `Bearer ${apiKey}` } });
     const data = (await response.json().catch(() => null)) as KlingTaskResponse | null;
-    if (!response.ok) return { ...task, error: data?.message ?? `Kling respondió ${response.status}.` };
+    if (!response.ok) return { ...task, error: describeProviderError(data?.message, `Kling respondió ${response.status}.`) };
     if (data?.data?.task_status === 'SUCCESS') {
       const url = data.data.images?.[0]?.url;
       return url ? { ...task, url } : { ...task, error: 'Kling completó sin devolver imagen.' };
     }
-    if (data?.data?.task_status === 'FAILED') return { ...task, error: data.message ?? 'Kling falló al generar la imagen.' };
+    if (data?.data?.task_status === 'FAILED') return { ...task, error: describeProviderError(data.message, 'Kling falló al generar la imagen.') };
     return task;
   } catch (error) {
     return { ...task, error: error instanceof Error ? error.message : 'No se pudo consultar el estado.' };
