@@ -6,6 +6,7 @@ export type ImageRequest = {
   count: number;
   model?: string;
   referenceImage?: string;
+  soulId?: string;
 };
 
 export type ImageGenerationResult = {
@@ -13,12 +14,6 @@ export type ImageGenerationResult = {
   source: 'live' | 'demo';
 };
 
-const demoImages = [
-  '/assets/creator-wide.png',
-  '/assets/creator-portrait-1.png',
-  '/assets/creator-portrait-2.png',
-  '/assets/creator-portrait-3.png',
-];
 
 async function requestLiveImages(request: ImageRequest): Promise<string[]> {
   const response = await fetch('/api/generate-image', {
@@ -39,25 +34,7 @@ async function requestLiveImages(request: ImageRequest): Promise<string[]> {
   return data.images;
 }
 
-function createFallbackImages(request: ImageRequest): string[] {
-  const offset = (request.prompt.length + request.style.length) % demoImages.length;
-  return Array.from(
-    { length: request.count },
-    (_, index) => demoImages[(index + offset) % demoImages.length],
-  );
-}
-
-/**
- * Tries the real image generation endpoint (app/api/generate-image/route.ts) first.
- * Falls back to bundled demo images when no API key is configured yet, or the
- * request fails, so the interface keeps working before the production API is wired up.
- */
 export async function generateImages(request: ImageRequest): Promise<ImageGenerationResult> {
-  try {
     const images = await requestLiveImages(request);
     return { images, source: 'live' };
-  } catch {
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-    return { images: createFallbackImages(request), source: 'demo' };
-  }
 }

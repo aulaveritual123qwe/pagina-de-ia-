@@ -94,7 +94,7 @@ const USERS_KEY = 'creators-users';
 function onboardedKey(email: string) { return `creators-onboarded:${email}`; }
 function charactersKey(email: string) { return `creators-characters:${email}`; }
 
-type Character = { id: string; name: string; referenceImage: string; resultImage: string };
+type Character = { id: string; name: string; referenceImage: string; resultImage: string; references?: string[]; soulId?: string; description?: string };
 type UserRecord = { name: string; passwordHash: string };
 
 async function hashPassword(password: string): Promise<string> {
@@ -135,10 +135,10 @@ export default function HomePage() {
     'Retrato editorial en una cafetería creativa, luz cálida, reflejos violeta, fotografía realista y natural.',
   );
   const [style, setStyle] = useState('Realista');
-  const [ratio, setRatio] = useState('4:5');
+  const [ratio, setRatio] = useState('3:4');
   const [quality, setQuality] = useState('Alta');
   const [imageCount, setImageCount] = useState('4');
-  const [model, setModel] = useState('higgsfield');
+  const model = 'higgsfield';
   const [credits, setCredits] = useState(320);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState(media);
@@ -199,9 +199,7 @@ export default function HomePage() {
     } catch {
       setCharacters([]);
     }
-    if (window.localStorage.getItem(onboardedKey(email)) !== 'true') {
-      setShowOnboarding(true);
-    }
+    setShowOnboarding(true);
   }
 
   function completeOnboarding() {
@@ -355,6 +353,9 @@ export default function HomePage() {
   async function handleGenerate() {
     if (!prompt.trim() || isGenerating) return;
     const amount = Number(imageCount);
+    if (credits < amount * IMAGE_CREDIT_COST) { notify('No tienes créditos suficientes.'); return; }
+    const avatar = characters.find((character) => character.name === selectedAvatar);
+    if (avatar && !avatar.soulId) { notify('Este avatar necesita configurarse con 5 a 10 referencias con sus referencias. Crea su nueva identidad en Mis Avatares.'); return; }
     setIsGenerating(true);
     try {
       const { images, source } = await generateImages({
@@ -363,19 +364,27 @@ export default function HomePage() {
         aspectRatio: ratio,
         quality,
         count: amount,
-        model,
-        referenceImage: referenceImage?.dataUrl,
+        model: 'higgsfield',
+        referenceImage: avatar?.soulId ? undefined : avatar?.referenceImage ?? referenceImage?.dataUrl,
+        soulId: avatar?.soulId,
       });
       setResults(images);
+      if (avatar) {
+        setCharacters((current) => {
+          const next = current.map((character) => character.id === avatar.id ? { ...character, resultImage: images[0] } : character);
+          window.localStorage.setItem(charactersKey(accountEmail), JSON.stringify(next));
+          return next;
+        });
+      }
       setResultSource(source);
-      setCredits((current) => Math.max(0, current - amount * IMAGE_CREDIT_COST));
+      setCredits((current) => Math.max(0, current - images.length * IMAGE_CREDIT_COST));
       notify(
         source === 'live'
           ? `${images.length} imagen${images.length === 1 ? '' : 'es'} generada${images.length === 1 ? '' : 's'} con IA.`
           : `${images.length} imagen${images.length === 1 ? '' : 'es'} generada${images.length === 1 ? '' : 's'} en modo demostración.`,
       );
-    } catch {
-      notify('No se pudo completar la generación. Inténtalo nuevamente.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'No se pudo completar la generación. Inténtalo nuevamente.');
     } finally {
       setIsGenerating(false);
     }
@@ -393,7 +402,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${view === 'especial' ? ' special-theme' : ''}`}>
       <Sidebar
         view={view}
         open={mobileNav}
@@ -483,6 +492,7 @@ export default function HomePage() {
           )}
           {(view === 'crear' || (view === 'especial' && specialMode === 'Crear imagen')) && (
             <CreateView
+              avatarImage={characters.find((character) => character.name === selectedAvatar)?.resultImage}
               hideHeading={view === 'especial'}
               prompt={prompt}
               setPrompt={setPrompt}
@@ -494,8 +504,7 @@ export default function HomePage() {
               setQuality={setQuality}
               imageCount={imageCount}
               setImageCount={setImageCount}
-              model={model}
-              setModel={setModel}
+              model={characters.some((character) => character.name === selectedAvatar) ? 'higgsfield' : model}
               isGenerating={isGenerating}
               onGenerate={handleGenerate}
               results={results}
@@ -540,6 +549,7 @@ export default function HomePage() {
         </main>
       </div>
       {notice && <div className="app-notice" role="status"><Check size={18} /> {notice}</div>}
+      {isGenerating && <div className="image-loading-screen" role="status" aria-live="polite"><LoaderCircle className="spin" size={40} /><h2>Creando tus imágenes</h2><p>Preparando tu escena en formato {ratio}. Mantén esta página abierta.</p></div>}
       {showOnboarding && (
         <CharacterOnboarding
           credits={credits}
@@ -874,7 +884,7 @@ type CreateViewProps = {
   imageCount: string;
   setImageCount: (value: string) => void;
   model: string;
-  setModel: (value: string) => void;
+
   isGenerating: boolean;
   onGenerate: () => void;
   results: string[];
@@ -892,15 +902,9 @@ type CreateViewProps = {
 
 const MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024;
 
-const MODEL_OPTIONS: Array<{ value: string; label: string; sublabel: string; icon: typeof Sparkles }> = [
-  { value: 'higgsfield', label: 'Higgsfield', sublabel: 'Fotorealismo', icon: Sparkles },
-  { value: 'qwen', label: 'Qwen', sublabel: 'Edición avanzada', icon: WandSparkles },
-  { value: 'kling', label: 'Kling', sublabel: 'Experimental', icon: Zap },
-];
-
 const RATIO_OPTIONS: Array<{ value: string; label: string; width: number; height: number }> = [
   { value: '1:1', label: '1:1', width: 16, height: 16 },
-  { value: '4:5', label: '4:5', width: 14, height: 17 },
+  { value: '3:4', label: '3:4', width: 14, height: 17 },
   { value: '9:16', label: '9:16', width: 11, height: 19 },
   { value: '16:9', label: '16:9', width: 19, height: 11 },
 ];
@@ -919,37 +923,6 @@ function RatioIcon({ width, height }: { width: number; height: number }) {
         strokeWidth="1.6"
       />
     </svg>
-  );
-}
-
-function ModelField({ value, onChange, disabled }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
-  return (
-    <div className="field-block">
-      <span className="field-label">Modelo</span>
-      <div className="model-picker" role="radiogroup" aria-label="Modelo de generación">
-        {MODEL_OPTIONS.map((option) => {
-          const Icon = option.icon;
-          const selected = option.value === value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              className={`model-card ${selected ? 'is-selected' : ''}`}
-              disabled={disabled}
-              onClick={() => onChange(option.value)}
-            >
-              <span className="model-card-icon"><Icon size={16} /></span>
-              <span className="model-card-copy">
-                <strong>{option.label}</strong>
-                <small>{option.sublabel}</small>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
@@ -1005,11 +978,11 @@ function SegmentedField({ label, value, onChange, options }: { label: string; va
   );
 }
 
-function CreateView(props: CreateViewProps & { hideHeading?: boolean }) {
+function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImage?: string }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const referenceInput = useRef<HTMLInputElement>(null);
   const currentImage = props.results[currentIndex] ?? props.results[0] ?? media[0];
-  const avatarImage = props.selectedAvatar === 'Lua Beach' ? media[2] : props.selectedAvatar === 'Lua Studio' ? media[3] : media[1];
+  const avatarImage = props.avatarImage ?? (props.selectedAvatar === 'Lua Beach' ? media[2] : props.selectedAvatar === 'Lua Studio' ? media[3] : media[1]);
 
   useEffect(() => setCurrentIndex(0), [props.results]);
   return (
@@ -1082,7 +1055,8 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean }) {
                   const file = event.target.files?.[0];
                   event.target.value = '';
                   if (!file) return;
-                  if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
+                  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { props.onNotify('Usa imágenes JPG, PNG o WebP.'); return; }
+    if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
                     props.onNotify('La imagen de referencia debe pesar menos de 5 MB.');
                     return;
                   }
@@ -1101,7 +1075,7 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean }) {
           </Step>
 
           <Step title="Ajustes de imagen" number="3">
-            <ModelField value={props.model} onChange={props.setModel} />
+
             <div className="settings-grid">
               <SelectField label="Estilo" value={props.style} onChange={props.setStyle} options={['Realista', 'Editorial', 'Cinematográfico', 'Ilustración']} />
               <SegmentedField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />
@@ -1110,12 +1084,7 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean }) {
               <RatioField value={props.ratio} onChange={props.setRatio} disabled={Boolean(props.referenceImage) && props.model !== 'higgsfield'} />
               <SegmentedField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} />
             </div>
-            {props.referenceImage && props.model === 'higgsfield' && (
-              <p className="reference-note">Usando <strong>Higgsfield Soul</strong> para generar una nueva imagen manteniendo el parecido de tu referencia.</p>
-            )}
-            {props.referenceImage && props.model !== 'higgsfield' && (
-              <p className="reference-note">Usando <strong>Qwen Image Edit</strong> para transformar tu imagen de referencia — el formato no aplica en este modo.</p>
-            )}
+            {props.referenceImage && <p className="reference-note">Tu referencia se usará para mantener la apariencia del personaje.</p>}
           </Step>
 
           <div className="generation-summary">
@@ -1125,8 +1094,8 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean }) {
                 {props.referenceImage
                   ? 'Editando tu imagen de referencia con IA'
                   : props.resultSource === 'live'
-                    ? 'Conectado a la API de imágenes'
-                    : 'Modo demostración · Añade tu API key para generar imágenes reales'}
+                    ? 'Crea una nueva imagen con tus ajustes'
+                    : 'Elige tus ajustes y genera tu primera imagen'}
               </small>
             </div>
             <span className="estimated-cost"><Coins size={16} /> {Number(props.imageCount) * IMAGE_CREDIT_COST} créditos</span>
@@ -1256,7 +1225,7 @@ function QuickCard({ icon: Icon, title, copy, tone, onClick }: { icon: typeof Ho
   return <button className={`quick-card ${tone}`} type="button" onClick={onClick}><span><Icon size={24} /></span><div><strong>{title}</strong><small>{copy}</small></div><span className="quick-arrow">→</span></button>;
 }
 
-const ANALYSIS_TRAITS = ['Rasgos faciales', 'Cabello', 'Piel', 'Tipo de cuerpo', 'Estilo'];
+
 
 function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
   credits: number;
@@ -1266,7 +1235,12 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
 }) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [reference, setReference] = useState<{ name: string; dataUrl: string } | null>(null);
-  const [checkedTraits, setCheckedTraits] = useState(0);
+  const [references, setReferences] = useState<Array<{ name: string; dataUrl: string }>>([]);
+  const [soulId, setSoulId] = useState('');
+  const [savedReferences, setSavedReferences] = useState<string[]>([]);
+  const [description, setDescription] = useState('');
+  const [avatarRatio, setAvatarRatio] = useState('3:4');
+
   const [name, setName] = useState('Mi personaje');
   const [prompt, setPrompt] = useState('Misma persona, en una cafetería, usando un vestido negro, mirando a la cámara, estilo fotografía profesional.');
   const [generating, setGenerating] = useState(false);
@@ -1274,23 +1248,8 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
   const [resultImage, setResultImage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (step !== 2) return;
-    setCheckedTraits(0);
-    const interval = window.setInterval(() => {
-      setCheckedTraits((current) => {
-        if (current >= ANALYSIS_TRAITS.length - 1) {
-          window.clearInterval(interval);
-          window.setTimeout(() => setStep(3), 500);
-          return ANALYSIS_TRAITS.length;
-        }
-        return current + 1;
-      });
-    }, 450);
-    return () => window.clearInterval(interval);
-  }, [step]);
-
   function handleFile(file: File) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setError('Usa imágenes JPG, PNG o WebP.'); return; }
     if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
       setError('La imagen debe pesar menos de 5 MB.');
       return;
@@ -1299,6 +1258,8 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
     reader.onload = () => {
       if (typeof reader.result === 'string') {
         setReference({ name: file.name, dataUrl: reader.result });
+        const dataUrl = reader.result;
+        setReferences((current) => [...current, { name: file.name, dataUrl }].slice(0, 10));
         setError('');
       }
     };
@@ -1306,7 +1267,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
   }
 
   async function handleGenerate() {
-    if (!reference || generating) return;
+    if (!reference || references.length < 5 || generating) return;
     const cost = IMAGE_CREDIT_COST;
     if (credits < cost) {
       setError('No tienes créditos suficientes para crear tu personaje.');
@@ -1315,17 +1276,42 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
     setGenerating(true);
     setError('');
     try {
+      let identity = soulId;
+      if (!identity) {
+        const urls: string[] = [];
+        for (const image of references) {
+          const upload = await fetch('/api/upload-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: image.dataUrl, purpose: 'avatar' }) });
+          const uploaded = await upload.json() as { url?: string; error?: string };
+          if (!upload.ok || !uploaded.url) throw new Error(uploaded.error ?? 'No se pudo subir una referencia.');
+          urls.push(uploaded.url);
+        }
+        setSavedReferences(urls);
+        const create = await fetch('/api/soul-character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, references: urls }) });
+        const created = await create.json() as { id?: string; error?: string };
+        if (!create.ok || !created.id) throw new Error(created.error ?? 'No se pudo crear la identidad.');
+        identity = created.id;
+        setSoulId(identity);
+      }
+      let ready = false;
+      for (let attempt = 0; attempt < 120; attempt++) {
+        const response = await fetch(`/api/soul-character?id=${encodeURIComponent(identity)}`);
+        const data = await response.json() as { status?: string; error?: string };
+        if (!response.ok || data.status === 'failed') throw new Error(data.error ?? 'No se pudo preparar el avatar.');
+        if (data.status === 'completed') { ready = true; break; }
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+      if (!ready) throw new Error('Seguimos preparando tu avatar. Pulsa Reintentar para consultar la misma identidad.');
       const response = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
+          prompt: `${description}. ${prompt}`,
           style: 'Realista',
-          aspectRatio: '4:5',
+          aspectRatio: avatarRatio,
           quality: 'Alta',
           count: 1,
           model: 'higgsfield',
-          referenceImage: reference.dataUrl,
+          soulId: identity,
         }),
       });
       const data = (await response.json().catch(() => null)) as { images?: string[]; error?: string } | null;
@@ -1343,7 +1329,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
 
   function handleSave() {
     if (!reference || !resultImage) return;
-    onCreated({ id: crypto.randomUUID(), name: name.trim() || 'Mi personaje', referenceImage: reference.dataUrl, resultImage });
+    onCreated({ id: crypto.randomUUID(), name: name.trim() || 'Mi personaje', referenceImage: savedReferences[0], resultImage, soulId, description, references: savedReferences });
   }
 
   return (
@@ -1351,58 +1337,36 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
       <div className="onboarding-card">
         <button type="button" className="onboarding-close" aria-label="Omitir por ahora" onClick={onSkip}><X size={18} /></button>
         <div className="onboarding-steps">
-          {[1, 2, 3, 4].map((n) => <span key={n} className={`onboarding-dot ${step >= n ? 'is-done' : ''}`} />)}
+          {[1, 3, 4].map((n) => <span key={n} className={`onboarding-dot ${step >= n ? 'is-done' : ''}`} />)}
         </div>
 
         {step === 1 && (
           <div className="onboarding-step">
             <span className="onboarding-eyebrow">PASO 1</span>
-            <h2>Sube una foto de referencia</h2>
-            <p>Usa una foto clara de tu rostro y cuerpo. La IA aprenderá tus rasgos para generar nuevas imágenes con la misma identidad.</p>
-            {reference ? (
-              <div className="onboarding-preview">
-                <img src={reference.dataUrl} alt="Referencia" />
-                <button type="button" className="reference-remove" aria-label="Quitar imagen" onClick={() => setReference(null)}><X size={15} /></button>
-              </div>
-            ) : (
-              <button type="button" className="onboarding-upload" onClick={() => fileInputRef.current?.click()}>
-                <Upload size={22} /> Subir foto
-              </button>
-            )}
+            <h2>Crea tu avatar desde cero</h2>
+            <p>Sube entre 5 y 10 fotos del mismo personaje: rostro de frente, perfiles y cuerpo. Usaremos estas referencias para preparar su identidad.</p>
+            <div className="avatar-reference-grid">{references.map((image, index) => <div key={`${image.name}-${index}`}><img src={image.dataUrl} alt={`Referencia ${index + 1}`} /><button type="button" aria-label={`Quitar referencia ${index + 1}`} onClick={() => setReferences((current) => current.filter((_, i) => i !== index))}><X size={14} /></button></div>)}</div>
+            <p>{references.length}/10 referencias · mínimo 5</p>
+            <Button type="button" variant="secondary" disabled={references.length >= 10} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> Añadir referencias</Button>
             <input
               ref={fileInputRef}
               className="visually-hidden"
               type="file"
+              multiple
               accept="image/*"
-              onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) handleFile(file); }}
+              onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; if (files.length + references.length > 10) { setError('Puedes subir como máximo 10 referencias.'); return; } files.forEach(handleFile); }}
             />
             {error && <p className="onboarding-error">{error}</p>}
             <div className="onboarding-actions">
               <button type="button" className="link-button" onClick={onSkip}>Omitir por ahora</button>
-              <Button type="button" disabled={!reference} onClick={() => setStep(2)}>Continuar <ArrowRight size={16} /></Button>
+              <Button type="button" disabled={references.length < 5} onClick={() => setStep(3)}>Continuar <ArrowRight size={16} /></Button>
             </div>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="onboarding-step">
-            <span className="onboarding-eyebrow">PASO 2</span>
-            <h2>La IA analiza y aprende</h2>
-            <p>Extrayendo las características clave de tu personaje...</p>
-            <ul className="onboarding-traits">
-              {ANALYSIS_TRAITS.map((trait, index) => (
-                <li key={trait} className={index < checkedTraits ? 'is-checked' : ''}>
-                  <span>{index < checkedTraits ? <Check size={14} /> : <LoaderCircle size={14} className="spin" />}</span>
-                  {trait}
-                </li>
-              ))}
-            </ul>
           </div>
         )}
 
         {step === 3 && (
           <div className="onboarding-step">
-            <span className="onboarding-eyebrow">PASO 3</span>
+            <span className="onboarding-eyebrow">PASO 2</span>
             <h2>Describe tu escena</h2>
             <p>Escribe el escenario, pose, outfit o estilo que quieres para tu personaje.</p>
             <label className="onboarding-field">Nombre del personaje
@@ -1411,6 +1375,9 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
             <label className="onboarding-field">Prompt
               <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={500} />
             </label>
+            <label className="onboarding-field">Descripción del avatar<Textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} /></label>
+            <SelectField label="Formato" value={avatarRatio} onChange={setAvatarRatio} options={['1:1', '3:4', '9:16', '16:9']} />
+            <p>{references.length} referencias para tu avatar</p>
             <div className="onboarding-actions">
               <button type="button" className="link-button" onClick={onSkip}>Omitir por ahora</button>
               <Button type="button" disabled={prompt.trim().length < 3} onClick={() => { setStep(4); handleGenerate(); }}>
@@ -1422,7 +1389,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
 
         {step === 4 && (
           <div className="onboarding-step">
-            <span className="onboarding-eyebrow">PASO 4</span>
+            <span className="onboarding-eyebrow">PASO 3</span>
             <h2>{resultImage ? 'Tu personaje está listo' : 'Generando tu primera imagen'}</h2>
             {!resultImage && !error && <p>Manteniendo la misma identidad en una nueva escena. Puede tardar un momento...</p>}
             <div className="onboarding-result">
@@ -1451,7 +1418,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
 
 function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvatar, characters, onCreateCharacter }: { onNavigate: (view: View) => void; plan: string; onNotify: (message: string) => void; selectedAvatar: string; onSelectAvatar: (name: string) => void; characters: Character[]; onCreateCharacter: () => void }) {
   const avatars = [
-    ...characters.map((character) => ({ name: character.name, detail: 'Tu personaje · Creado con IA', image: character.resultImage, premium: false })),
+    ...characters.map((character) => ({ name: character.name, detail: character.description || 'Tu personaje', image: character.resultImage, premium: false })),
     { name: 'Lua', detail: 'Principal · Realista', image: media[1], premium: false },
     { name: 'Lua Beach', detail: 'Lifestyle · Verano', image: media[2], premium: true },
     { name: 'Lua Studio', detail: 'Editorial · Interior', image: media[3], premium: true },
@@ -1487,6 +1454,7 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
             </div>
             <h2>{avatar.name}</h2>
             <p>{avatar.detail}</p>
+            <div className="avatar-reference-grid">{characters.find((character) => character.name === avatar.name)?.references?.map((url, index) => <img key={url} src={url} alt={`Referencia ${index + 1} de ${avatar.name}`} />)}</div>
             <Button type="button" variant={selectedAvatar === avatar.name ? 'default' : 'secondary'} onClick={() => {
               if (avatar.premium && plan === 'Free') {
                 onNavigate('planes');
@@ -1520,6 +1488,7 @@ const VIDEO_MAX_POLL_ATTEMPTS = 60; // up to ~5 minutes
 const VIDEO_MODE_OPTIONS = ['Texto a video', 'Imagen a video'];
 
 function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean; onNotify: (message: string) => void; hideHeading?: boolean }) {
+  const [studioMode, setStudioMode] = useState('Generar video');
   const [videoMode, setVideoMode] = useState(VIDEO_MODE_OPTIONS[0]);
   const [videoPrompt, setVideoPrompt] = useState('Lua caminando por una cafetería creativa, movimiento de cámara suave y luz cinematográfica.');
   const [duration, setDuration] = useState('5 segundos');
@@ -1607,7 +1576,9 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
   return (
     <div className="view-stack">
       {!hideHeading && <PageHeading eyebrow="ESTUDIO DE VIDEO" title="Generar Video con IA" description="Describe una escena y conviértela en un video con inteligencia artificial." note="Ideas que se mueven" />}
-      <section className="video-coming-card">
+      <SegmentedField label="Herramienta de video" value={studioMode} onChange={setStudioMode} options={['Generar video', 'Kling Motion Control']} />
+      <div hidden={studioMode !== 'Kling Motion Control'}><MotionControlView /></div>
+      <section className="video-coming-card" style={studioMode !== 'Generar video' ? { display: 'none' } : undefined}>
         <div className="video-coming-copy">
           <span><Video size={24} /></span>
           <small>DE TEXTO A VIDEO · 720P</small>
@@ -1643,7 +1614,8 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
                   const file = event.target.files?.[0];
                   event.target.value = '';
                   if (!file) return;
-                  if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
+                  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { onNotify('Usa imágenes JPG, PNG o WebP.'); return; }
+    if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
                     onNotify('La imagen debe pesar menos de 5 MB.');
                     return;
                   }
@@ -1662,7 +1634,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
           <div className="video-prompt-help" id="video-prompt-help"><span>Incluye el lugar, la luz y la acción.</span><span>{videoPrompt.length}/2000</span></div>
           <div className="settings-grid">
             <SelectField label="Duración" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos', '15 segundos']} />
-            <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} disabled={isImageMode} />
+            {isImageMode ? <p>Formato del video: se conserva el formato de la imagen de referencia.</p> : <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} />}
           </div>
           </fieldset>
           <Button className="video-generate-button" type="button" onClick={generateVideo} disabled={(!pendingTask && (videoPrompt.trim().length < 3 || (isImageMode && !refImage))) || generating}>
@@ -1731,7 +1703,7 @@ function LibraryView({ images, search, favorites, onToggleFavorite, onUpload }: 
   const visibleImages = filteredByTab.filter((_, index) => !query || ['editorial', 'retrato', 'neón', 'estudio', 'lifestyle', 'playa'][index % 6].includes(query));
   return (
     <div className="view-stack">
-      <PageHeading eyebrow="TU CONTENIDO" title="Biblioteca" description="Tus imágenes, organizadas para volver a usarlas cuando las necesites." note="Crea · Guarda · Reutiliza" />
+      <PageHeading eyebrow="TU CONTENIDO" title="Biblioteca" description="Las nuevas imágenes generadas se conservan durante 3 meses. Descárgalas antes de que caduquen." note="Crea · Guarda · Reutiliza" />
       <div className="library-toolbar">
         <div className="filter-tabs">{['Todas', 'Favoritas', 'Recientes'].map((item) => <button key={item} className={filter === item ? 'active' : ''} type="button" onClick={() => setFilter(item)}>{item}</button>)}</div>
         <Button type="button" onClick={() => uploadInput.current?.click()}><Upload /> Subir imagen</Button>
@@ -1763,14 +1735,14 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
   const [autoSave, setAutoSave] = useState(true);
   const [emails, setEmails] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [profile, setProfile] = useState({ name: profileName, email: accountEmail, language: 'Español', timezone: 'GMT-05:00 · Lima' });
+  const [profile, setProfile] = useState({ name: profileName, email: accountEmail, language: 'Español', description: '' });
 
   useEffect(() => {
     const saved = window.localStorage.getItem('creator-profile');
     if (!saved) return;
     try {
       const storedProfile = JSON.parse(saved);
-      setProfile(storedProfile);
+      setProfile({ name: storedProfile.name ?? profileName, email: storedProfile.email ?? accountEmail, language: storedProfile.language ?? 'Español', description: storedProfile.description ?? '' });
       if (storedProfile.name) onProfileNameChange(storedProfile.name);
     } catch { window.localStorage.removeItem('creator-profile'); }
   }, []);
@@ -1790,7 +1762,7 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
     <div className="view-stack">
       <PageHeading eyebrow="TU ESPACIO" title="Configuración" description="Ajusta tu perfil y cómo quieres trabajar dentro del estudio." note="Hecho a tu manera" />
       <div className="settings-page-grid">
-        <section className="profile-settings"><div className="section-title-row"><h2>Información del perfil</h2><Button variant="secondary" size="sm" type="button" onClick={() => editing ? saveProfile() : setEditing(true)}>{editing ? 'Guardar' : 'Editar'}</Button></div><div className="profile-summary"><img src="/assets/creator-portrait-1.png" alt="Foto de perfil" /><div><strong>{profile.name}</strong><span>{accountEmail}</span><small>Creador de contenido · Perú</small></div></div><div className="form-grid"><label>Nombre<input value={profile.name} readOnly={!editing} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></label><label>Correo<input value={profile.email} readOnly={!editing} onChange={(event) => setProfile({ ...profile, email: event.target.value })} /></label><label>Idioma<input value={profile.language} readOnly={!editing} onChange={(event) => setProfile({ ...profile, language: event.target.value })} /></label><label>Zona horaria<input value={profile.timezone} readOnly={!editing} onChange={(event) => setProfile({ ...profile, timezone: event.target.value })} /></label></div></section>
+        <section className="profile-settings"><div className="section-title-row"><h2>Información del perfil</h2><Button variant="secondary" size="sm" type="button" onClick={() => editing ? saveProfile() : setEditing(true)}>{editing ? 'Guardar' : 'Editar'}</Button></div><div className="profile-summary"><img src="/assets/creator-portrait-1.png" alt="Foto de perfil" /><div><strong>{profile.name}</strong><span>{accountEmail}</span><small>Creador de contenido · Perú</small></div></div><div className="form-grid"><label>Nombre<input value={profile.name} readOnly={!editing} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></label><label>Correo<input value={profile.email} readOnly={!editing} onChange={(event) => setProfile({ ...profile, email: event.target.value })} /></label><label>Idioma<input value={profile.language} readOnly={!editing} onChange={(event) => setProfile({ ...profile, language: event.target.value })} /></label><label>Descripción<Textarea value={profile.description} readOnly={!editing} maxLength={500} placeholder="Cuéntanos qué contenido creas" onChange={(event) => setProfile({ ...profile, description: event.target.value })} /></label></div></section>
         <section className="preference-settings"><h2>Preferencias</h2><PreferenceRow icon={FolderHeart} title="Guardar automáticamente" copy="Añade cada generación a tu biblioteca." checked={autoSave} onChange={(checked) => { setAutoSave(checked); onNotify(checked ? 'Guardado automático activado.' : 'Guardado automático desactivado.'); }} /><PreferenceRow icon={Bell} title="Novedades por correo" copy="Recibe nuevas funciones y consejos." checked={emails} onChange={(checked) => { setEmails(checked); onNotify(checked ? 'Novedades por correo activadas.' : 'Novedades por correo desactivadas.'); }} />
           <div className="account-actions">
             <h2>Cuenta</h2>
@@ -1807,4 +1779,107 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
 
 function PreferenceRow({ icon: Icon, title, copy, checked, onChange }: { icon: typeof Home; title: string; copy: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return <div className="preference-row"><span><Icon size={20} /></span><div><strong>{title}</strong><small>{copy}</small></div><Switch checked={checked} onCheckedChange={onChange} aria-label={title} /></div>;
+}
+
+
+
+
+
+function MotionControlView() {
+  const [uploading, setUploading] = useState(false);
+  const [imageName, setImageName] = useState('');
+  const [videoName, setVideoName] = useState('');
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [imageUrl, setImageUrl] = useState('');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const [orientation, setOrientation] = useState('Video de referencia');
+  const [quality, setQuality] = useState('Estándar');
+  const [sound, setSound] = useState(true);
+  const [task, setTask] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState('');
+  const lock = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  async function uploadReference(file: File, kind: 'image' | 'video') {
+    if (file.size > 20 * 1024 * 1024) { setError('El archivo debe pesar como máximo 20 MB.'); return; }
+    setUploading(true); setError('');
+    const preview = URL.createObjectURL(file);
+    try {
+      let duration = 0;
+      await new Promise<void>((resolve, reject) => {
+        if (kind === 'image') {
+          const image = new Image();
+          image.onload = () => image.width >= 340 && image.height >= 340 && image.width / image.height >= .4 && image.width / image.height <= 2.5 ? resolve() : reject(new Error('Usa una imagen de al menos 340 px por lado, con proporción entre 1:2.5 y 2.5:1.'));
+          image.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+          image.src = preview;
+        } else {
+          const video = document.createElement('video');
+          video.preload = 'metadata';
+          video.onloadedmetadata = () => {
+            duration = video.duration;
+            const valid = duration >= 3 && duration <= 30 && video.videoWidth >= 340 && video.videoHeight >= 340 && video.videoWidth <= 3850 && video.videoHeight <= 3850;
+            video.removeAttribute('src'); video.load();
+            valid ? resolve() : reject(new Error('Usa un video de 3 a 30 segundos y entre 340 y 3850 px por lado.'));
+          };
+          video.onerror = () => reject(new Error('No se pudo leer el video. Usa MP4 o MOV.'));
+          video.src = preview;
+        }
+      });
+      const form = new FormData(); form.set('file', file);
+      const response = await fetch('/api/motion-upload', {method:'POST',body:form});
+      const data = await response.json() as {url?:string;error?:string};
+      if (!response.ok || !data.url) throw new Error(data.error ?? 'No se pudo subir la referencia.');
+      if (kind === 'image') { setImageUrl(data.url); setImageName(file.name); }
+      else { setVideoUrl(data.url); setVideoName(file.name); setVideoDuration(duration); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo subir el archivo.'); }
+    finally { URL.revokeObjectURL(preview); setUploading(false); }
+  }
+  async function generate() {
+    if (lock.current || uploading) return;
+    if (!task && orientation === 'Imagen del personaje' && videoDuration > 10) { setError('Con orientación de la imagen, usa un video de hasta 10 segundos.'); return; }
+    lock.current = true; setBusy(true); setError('');
+    try {
+      let id = task;
+      if (!id) {
+        const response = await fetch('/api/motion-control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageUrl, videoUrl, prompt, orientation: orientation === 'Video de referencia' ? 'video' : 'image', mode: quality === 'Estándar' ? 'std' : 'pro', keepSound: sound }) });
+        const data = await response.json() as { taskId?: string; error?: string };
+        if (!response.ok || !data.taskId) throw new Error(data.error ?? 'No se pudo iniciar Motion Control.');
+        id = data.taskId; setTask(id);
+      }
+      for (let attempt = 0; attempt < 120; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        if (!mounted.current) return;
+        const response = await fetch(`/api/motion-control?taskId=${encodeURIComponent(id)}`, { cache: 'no-store' });
+        const data = await response.json() as { status?: string; url?: string; error?: string };
+        if (!response.ok) throw new Error(data.error ?? 'No se pudo consultar el video.');
+        if (data.status === 'FAILED') { setTask(''); throw new Error(data.error ?? 'La generación falló.'); }
+        if (data.status === 'SUCCEEDED' && data.url) { setResult(data.url); setTask(''); return; }
+      }
+      throw new Error('El video sigue pendiente. Consulta el resultado sin crear una nueva tarea.');
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo generar el video.'); }
+    finally { lock.current = false; setBusy(false); }
+  }
+  return <section className="video-coming-card">
+    <div className="video-coming-copy">
+      <h2>Kling Motion Control</h2><p>Transfiere los movimientos de un video a tu personaje.</p>
+      <fieldset className="video-fields" disabled={busy || !!task || uploading}>
+        <div className="motion-reference-grid">
+          <label className="motion-upload"><span><ImageIcon size={18} /> Imagen del personaje</span>{imageUrl ? <img src={imageUrl} alt="Personaje de referencia" /> : <div className="motion-upload-placeholder"><Upload size={26} /><strong>Sube tu personaje</strong><small>JPG, PNG o WebP</small></div>}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { const file=event.target.files?.[0]; event.target.value=''; if(file) void uploadReference(file,'image'); }} /><small>{imageName || 'Hasta 20 MB · mínimo 340 px por lado'}</small></label>
+          <label className="motion-upload"><span><Video size={18} /> Video de movimiento</span>{videoUrl ? <video src={videoUrl} controls playsInline preload="metadata" /> : <div className="motion-upload-placeholder"><Upload size={26} /><strong>Añade el movimiento</strong><small>MP4 o MOV · 3–30 segundos</small></div>}<input type="file" accept="video/mp4,video/quicktime" onChange={(event) => { const file=event.target.files?.[0]; event.target.value=''; if(file) void uploadReference(file,'video'); }} /><small>{videoName || 'Hasta 20 MB'}</small></label>
+        </div>
+        <label className="video-prompt-label">Descripción de la escena<Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={2500} /></label>
+        <SelectField label="Orientación del personaje" value={orientation} onChange={setOrientation} options={['Video de referencia', 'Imagen del personaje']} />
+        <SelectField label="Calidad" value={quality} onChange={setQuality} options={['Estándar', 'Profesional']} />
+        <label className="motion-sound"><Switch checked={sound} onCheckedChange={setSound} /> Conservar audio original</label>
+        <p>{orientation === 'Video de referencia' ? 'Video de 3 a 30 segundos.' : 'Video de 3 a 10 segundos.'} El formato sigue la referencia; no se recorta la vista previa.</p>
+      </fieldset>
+      <Button className="video-generate-button" onClick={generate} disabled={busy || uploading || (!task && (!imageUrl || !videoUrl))}>{uploading ? 'Subiendo referencia…' : busy ? <><LoaderCircle className="spin" /> Generando movimiento…</> : task ? 'Consultar resultado' : 'Generar movimiento'}</Button>
+      {busy && <p role="status">Kling está procesando las referencias. Mantén esta página abierta.</p>}
+      {error && <div className="video-error" role="alert">{error}</div>}
+    </div>
+    <div className="video-result">{result ? <><video className="motion-result" src={result} controls playsInline /><a href={result} target="_blank" rel="noopener noreferrer">Abrir y guardar video</a></> : <div className="motion-empty"><Video size={32} /><h3>Tu personaje, en movimiento</h3><p>El resultado aparecerá aquí al completar la generación.</p></div>}</div>
+  </section>;
 }

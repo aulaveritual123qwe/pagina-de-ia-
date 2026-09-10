@@ -6,7 +6,7 @@ type KVNamespaceLike = {
   getWithMetadata: (
     key: string,
     options: { type: 'arrayBuffer' },
-  ) => Promise<{ value: ArrayBuffer | null; metadata: { mimeType?: string } | null }>;
+  ) => Promise<{ value: ArrayBuffer | null; metadata: { mimeType?: string; expiresAt?: number } | null }>;
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -17,14 +17,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const kv = (env as unknown as { IMAGE_CACHE: KVNamespaceLike }).IMAGE_CACHE;
   const { value, metadata } = await kv.getWithMetadata(id, { type: 'arrayBuffer' });
-  if (!value) {
+  if (!value || (metadata?.expiresAt && metadata.expiresAt <= Date.now())) {
     return new Response('Not found', { status: 404 });
   }
 
   return new Response(value, {
     headers: {
       'Content-Type': metadata?.mimeType ?? 'application/octet-stream',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'private, no-store',
     },
   });
 }

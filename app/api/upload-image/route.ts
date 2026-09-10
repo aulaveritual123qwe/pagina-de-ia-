@@ -29,7 +29,7 @@ function base64ToBytes(base64: string): Uint8Array {
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => null)) as { dataUrl?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { dataUrl?: unknown; purpose?: unknown } | null;
   const dataUrl = typeof body?.dataUrl === 'string' ? body.dataUrl : '';
   const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
   if (!match) {
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
 
   const id = crypto.randomUUID();
   const kv = (env as unknown as { IMAGE_CACHE: KVNamespaceLike }).IMAGE_CACHE;
-  await kv.put(id, bytes.buffer as ArrayBuffer, { expirationTtl: TTL_SECONDS, metadata: { mimeType } });
+  await kv.put(id, bytes.buffer as ArrayBuffer, { ...(body?.purpose === 'avatar' ? {} : { expirationTtl: TTL_SECONDS }), metadata: { mimeType } });
 
   const publicUrl = `${new URL(request.url).origin}/api/image/${id}`;
   return json({ url: publicUrl });
