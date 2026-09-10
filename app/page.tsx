@@ -146,6 +146,18 @@ export default function HomePage() {
   const [imageCount, setImageCount] = useState('4');
   const model = 'higgsfield';
   const [specialImageModel, setSpecialImageModel] = useState('qwen');
+  // "Contenido especial" keeps its own prompt/settings/results so it never mixes
+  // with "Crear Imagen" — they're two separate workspaces that happen to share UI.
+  const [specialPrompt, setSpecialPrompt] = useState('');
+  const [specialStyle, setSpecialStyle] = useState('Realista');
+  const [specialRatio, setSpecialRatio] = useState('3:4');
+  const [specialQuality, setSpecialQuality] = useState('Alta');
+  const [specialImageCount, setSpecialImageCount] = useState('4');
+  const [specialResults, setSpecialResults] = useState(media);
+  const [specialResultSource, setSpecialResultSource] = useState<'demo' | 'live'>('demo');
+  const [specialFavorite, setSpecialFavorite] = useState(false);
+  const [specialReferenceImage, setSpecialReferenceImage] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [specialIsGenerating, setSpecialIsGenerating] = useState(false);
   const [credits, setCredits] = useState(320);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState(media);
@@ -365,7 +377,6 @@ export default function HomePage() {
     if (credits < amount * IMAGE_CREDIT_COST) { notify('No tienes créditos suficientes.'); return; }
     const avatar = characters.find((character) => character.name === selectedAvatar);
     if (avatar && !avatar.soulId) { notify('Este avatar necesita configurarse con 5 a 10 referencias con sus referencias. Crea su nueva identidad en Mis Avatares.'); return; }
-    const activeModel = view === 'especial' && specialMode === 'Crear imagen' && !avatar?.soulId ? specialImageModel : 'higgsfield';
     setIsGenerating(true);
     try {
       const { images, source } = await generateImages({
@@ -374,7 +385,7 @@ export default function HomePage() {
         aspectRatio: ratio,
         quality,
         count: amount,
-        model: activeModel,
+        model: 'higgsfield',
         referenceImage: avatar?.soulId ? undefined : avatar?.referenceImage ?? referenceImage?.dataUrl,
         soulId: avatar?.soulId,
       });
@@ -397,6 +408,38 @@ export default function HomePage() {
       notify(error instanceof Error ? error.message : 'No se pudo completar la generación. Inténtalo nuevamente.');
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  // Independent generation flow for "Contenido especial" — separate prompt, settings
+  // and results from "Crear Imagen" so the two never mix.
+  async function handleGenerateSpecial() {
+    if (!specialPrompt.trim() || specialIsGenerating) return;
+    const amount = Number(specialImageCount);
+    if (credits < amount * IMAGE_CREDIT_COST) { notify('No tienes créditos suficientes.'); return; }
+    setSpecialIsGenerating(true);
+    try {
+      const { images, source } = await generateImages({
+        prompt: specialPrompt,
+        style: specialStyle,
+        aspectRatio: specialRatio,
+        quality: specialQuality,
+        count: amount,
+        model: specialImageModel,
+        referenceImage: specialReferenceImage?.dataUrl,
+      });
+      setSpecialResults(images);
+      setSpecialResultSource(source);
+      setCredits((current) => Math.max(0, current - images.length * IMAGE_CREDIT_COST));
+      notify(
+        source === 'live'
+          ? `${images.length} imagen${images.length === 1 ? '' : 'es'} generada${images.length === 1 ? '' : 's'} con IA.`
+          : `${images.length} imagen${images.length === 1 ? '' : 'es'} generada${images.length === 1 ? '' : 's'} en modo demostración.`,
+      );
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'No se pudo completar la generación. Inténtalo nuevamente.');
+    } finally {
+      setSpecialIsGenerating(false);
     }
   }
 
@@ -500,10 +543,9 @@ export default function HomePage() {
               </div>
             </div>
           )}
-          {(view === 'crear' || (view === 'especial' && specialMode === 'Crear imagen')) && (
+          {view === 'crear' && (
             <CreateView
               avatarImage={characters.find((character) => character.name === selectedAvatar)?.resultImage}
-              hideHeading={view === 'especial'}
               prompt={prompt}
               setPrompt={setPrompt}
               style={style}
@@ -514,9 +556,7 @@ export default function HomePage() {
               setQuality={setQuality}
               imageCount={imageCount}
               setImageCount={setImageCount}
-              model={view === 'especial' ? specialImageModel : model}
-              setModel={setSpecialImageModel}
-              showModelPicker={view === 'especial' && !characters.some((character) => character.name === selectedAvatar)}
+              model={model}
               isGenerating={isGenerating}
               onGenerate={handleGenerate}
               results={results}
@@ -530,6 +570,37 @@ export default function HomePage() {
               resultSource={resultSource}
               referenceImage={referenceImage}
               onReferenceImageChange={setReferenceImage}
+            />
+          )}
+          {view === 'especial' && specialMode === 'Crear imagen' && (
+            <CreateView
+              hideHeading
+              prompt={specialPrompt}
+              setPrompt={setSpecialPrompt}
+              style={specialStyle}
+              setStyle={setSpecialStyle}
+              ratio={specialRatio}
+              setRatio={setSpecialRatio}
+              quality={specialQuality}
+              setQuality={setSpecialQuality}
+              imageCount={specialImageCount}
+              setImageCount={setSpecialImageCount}
+              model={specialImageModel}
+              setModel={setSpecialImageModel}
+              showModelPicker
+              isGenerating={specialIsGenerating}
+              onGenerate={handleGenerateSpecial}
+              results={specialResults}
+              credits={credits}
+              favorite={specialFavorite}
+              setFavorite={setSpecialFavorite}
+              onToggleFavorite={toggleFavorite}
+              onNavigate={navigate}
+              onNotify={notify}
+              selectedAvatar={selectedAvatar}
+              resultSource={specialResultSource}
+              referenceImage={specialReferenceImage}
+              onReferenceImageChange={setSpecialReferenceImage}
             />
           )}
           {view === 'inicio' && <DashboardView onNavigate={navigate} credits={credits} />}
