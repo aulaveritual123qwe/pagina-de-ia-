@@ -15,6 +15,11 @@ export type ImageGenerationResult = {
 };
 
 
+const POLL_INTERVAL_MS = 4000;
+const MAX_POLL_MINUTES = 6;
+
+// The API submits the provider tasks and returns a jobId; polling happens here so each
+// status check is its own Worker invocation (Workers cap subrequests per invocation).
 async function requestLiveImages(request: ImageRequest): Promise<string[]> {
   const response = await fetch('/api/generate-image', {
     method: 'POST',
@@ -22,19 +27,30 @@ async function requestLiveImages(request: ImageRequest): Promise<string[]> {
     body: JSON.stringify(request),
   });
 
+  const data = (await response.json().catch(() => null)) as { images?: string[]; jobId?: string; error?: string } | null;
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `La API respondió con estado ${response.status}.`);
+    throw new Error(data?.error ?? `La API respondió con estado ${response.status}.`);
   }
 
-  const data = (await response.json()) as { images?: string[] };
-  if (!data.images?.length) {
-    throw new Error('La API no devolvió imágenes.');
+  // Synchronous providers (Qwen image editing) answer with the images directly.
+  if (data?.images?.length) return data.images;
+  if (!data?.jobId) throw new Error('La API no devolvió imágenes.');
+
+  const attempts = Math.ceil((MAX_POLL_MINUTES * 60_000) / POLL_INTERVAL_MS);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    const statusResponse = await fetch(`/api/generate-image?jobId=${encodeURIComponent(data.jobId)}`, { cache: 'no-store' });
+    const status = (await statusResponse.json().catch(() => null)) as
+      | { status?: string; images?: string[]; error?: string }
+      | null;
+    if (!statusResponse.ok) throw new Error(status?.error ?? 'No se pudo consultar la generación.');
+    if (status?.status === 'SUCCEEDED' && status.images?.length) return status.images;
+    if (status?.status === 'FAILED') throw new Error(status.error ?? 'No se pudo generar la imagen.');
   }
-  return data.images;
+  throw new Error('La generación tardó demasiado. Inténtalo nuevamente.');
 }
 
 export async function generateImages(request: ImageRequest): Promise<ImageGenerationResult> {
-    const images = await requestLiveImages(request);
-    return { images, source: 'live' };
+  const images = await requestLiveImages(request);
+  return { images, source: 'live' };
 }
