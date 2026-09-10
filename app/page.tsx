@@ -206,7 +206,9 @@ export default function HomePage() {
     } catch {
       setCharacters([]);
     }
-    setShowOnboarding(true);
+    if (window.localStorage.getItem(onboardedKey(email)) !== 'true') {
+      setShowOnboarding(true);
+    }
   }
 
   function completeOnboarding() {
