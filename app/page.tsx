@@ -76,6 +76,12 @@ const media = [
   '/assets/creator-portrait-3.png',
 ];
 
+const IMAGE_MODEL_OPTIONS = [
+  { id: 'higgsfield', label: 'Higgsfield', detail: 'Soul y fotorrealismo', icon: Sparkles },
+  { id: 'qwen', label: 'Qwen', detail: 'Editar con referencia', icon: WandSparkles },
+  { id: 'kling', label: 'Kling', detail: 'Imagen experimental', icon: Zap },
+];
+
 const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: 'inicio', label: 'Inicio', icon: Home },
   { id: 'avatares', label: 'Mis Avatares', icon: Users },
@@ -139,6 +145,7 @@ export default function HomePage() {
   const [quality, setQuality] = useState('Alta');
   const [imageCount, setImageCount] = useState('4');
   const model = 'higgsfield';
+  const [specialImageModel, setSpecialImageModel] = useState('qwen');
   const [credits, setCredits] = useState(320);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState(media);
@@ -356,6 +363,7 @@ export default function HomePage() {
     if (credits < amount * IMAGE_CREDIT_COST) { notify('No tienes créditos suficientes.'); return; }
     const avatar = characters.find((character) => character.name === selectedAvatar);
     if (avatar && !avatar.soulId) { notify('Este avatar necesita configurarse con 5 a 10 referencias con sus referencias. Crea su nueva identidad en Mis Avatares.'); return; }
+    const activeModel = view === 'especial' && specialMode === 'Crear imagen' && !avatar?.soulId ? specialImageModel : 'higgsfield';
     setIsGenerating(true);
     try {
       const { images, source } = await generateImages({
@@ -364,7 +372,7 @@ export default function HomePage() {
         aspectRatio: ratio,
         quality,
         count: amount,
-        model: 'higgsfield',
+        model: activeModel,
         referenceImage: avatar?.soulId ? undefined : avatar?.referenceImage ?? referenceImage?.dataUrl,
         soulId: avatar?.soulId,
       });
@@ -504,7 +512,9 @@ export default function HomePage() {
               setQuality={setQuality}
               imageCount={imageCount}
               setImageCount={setImageCount}
-              model={characters.some((character) => character.name === selectedAvatar) ? 'higgsfield' : model}
+              model={view === 'especial' ? specialImageModel : model}
+              setModel={setSpecialImageModel}
+              showModelPicker={view === 'especial' && !characters.some((character) => character.name === selectedAvatar)}
               isGenerating={isGenerating}
               onGenerate={handleGenerate}
               results={results}
@@ -884,6 +894,8 @@ type CreateViewProps = {
   imageCount: string;
   setImageCount: (value: string) => void;
   model: string;
+  setModel?: (value: string) => void;
+  showModelPicker?: boolean;
 
   isGenerating: boolean;
   onGenerate: () => void;
@@ -970,6 +982,36 @@ function SegmentedField({ label, value, onChange, options }: { label: string; va
               onClick={() => onChange(option)}
             >
               {option}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ModelField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="field-block image-model-field">
+      <span className="field-label">Modelo IA</span>
+      <div className="model-picker" role="radiogroup" aria-label="Modelo de imagen">
+        {IMAGE_MODEL_OPTIONS.map((option) => {
+          const Icon = option.icon;
+          const selected = option.id === value;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              className={`model-card ${selected ? 'is-selected' : ''}`}
+              onClick={() => onChange(option.id)}
+            >
+              <span className="model-card-icon"><Icon size={18} /></span>
+              <span className="model-card-copy">
+                <strong>{option.label}</strong>
+                <small>{option.detail}</small>
+              </span>
             </button>
           );
         })}
@@ -1076,15 +1118,16 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImag
 
           <Step title="Ajustes de imagen" number="3">
 
+            {props.showModelPicker && props.setModel && <ModelField value={props.model} onChange={props.setModel} />}
             <div className="settings-grid">
               <SelectField label="Estilo" value={props.style} onChange={props.setStyle} options={['Realista', 'Editorial', 'Cinematográfico', 'Ilustración']} />
               <SegmentedField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />
             </div>
             <div className="settings-grid">
-              <RatioField value={props.ratio} onChange={props.setRatio} disabled={Boolean(props.referenceImage) && props.model !== 'higgsfield'} />
+              <RatioField value={props.ratio} onChange={props.setRatio} />
               <SegmentedField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} />
             </div>
-            {props.referenceImage && <p className="reference-note">Tu referencia se usará para mantener la apariencia del personaje.</p>}
+            {props.referenceImage && <p className="reference-note">{props.model === 'qwen' ? 'Qwen editará tu referencia directamente desde esta sesión local.' : props.model === 'higgsfield' ? 'Higgsfield necesita una URL pública para leer referencias; en local usa Qwen.' : 'Kling genera desde texto en este flujo; usa Qwen para editar referencias.'}</p>}
           </Step>
 
           <div className="generation-summary">

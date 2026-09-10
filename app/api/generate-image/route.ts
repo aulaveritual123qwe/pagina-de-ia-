@@ -172,6 +172,151 @@ async function generateOneImageHiggsfieldReference(
   return pollHiggsfieldTask(submitPayload.status_url, authHeader);
 }
 
+// ===== Qwen-Image (Alibaba Model Studio, DashScope international) =====
+
+type QwenSubmitResponse = {
+  output?: { task_id?: string };
+  code?: string;
+  message?: string;
+};
+
+type QwenTaskResponse = {
+  output?: { task_status?: string; results?: Array<{ url?: string }> };
+  code?: string;
+  message?: string;
+};
+
+type QwenEditResponse = {
+  output?: { choices?: Array<{ message?: { content?: Array<{ image?: string; image_url?: string; url?: string }> } }> };
+  code?: string;
+  message?: string;
+};
+
+async function generateOneImageQwen(apiKey: string, prompt: string, size: string): Promise<string> {
+  const submitResponse = await fetch(QWEN_SUBMIT_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'X-DashScope-Async': 'enable',
+    },
+    body: JSON.stringify({
+      model: 'qwen-image',
+      input: { prompt },
+      parameters: { size, n: 1 },
+    }),
+  });
+
+  const submitPayload = (await submitResponse.json().catch(() => null)) as QwenSubmitResponse | null;
+  if (!submitResponse.ok || !submitPayload?.output?.task_id) {
+    throw new Error(submitPayload?.message ?? `Qwen respondió con estado ${submitResponse.status}.`);
+  }
+
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+    await sleep(POLL_INTERVAL_MS);
+    const statusResponse = await fetch(`${QWEN_TASK_URL}/${submitPayload.output.task_id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const statusPayload = (await statusResponse.json().catch(() => null)) as QwenTaskResponse | null;
+    if (!statusResponse.ok) {
+      throw new Error(statusPayload?.message ?? `No se pudo consultar Qwen (${statusResponse.status}).`);
+    }
+    if (statusPayload?.output?.task_status === 'SUCCEEDED') {
+      const url = statusPayload.output.results?.[0]?.url;
+      if (!url) throw new Error('Qwen completó sin devolver imagen.');
+      return url;
+    }
+    if (statusPayload?.output?.task_status === 'FAILED') {
+      throw new Error(statusPayload.message ?? 'Qwen falló al generar la imagen.');
+    }
+  }
+
+  throw new Error('Qwen tardó demasiado.');
+}
+
+async function editOneImageQwen(apiKey: string, referenceImage: string, prompt: string, size: string): Promise<string> {
+  const response = await fetch(QWEN_EDIT_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'qwen-image-3.0-pro',
+      input: {
+        messages: [
+          {
+            role: 'user',
+            content: [{ image: referenceImage }, { text: prompt }],
+          },
+        ],
+      },
+      parameters: { n: 1, negative_prompt: ' ', prompt_extend: true, watermark: false, size },
+    }),
+  });
+
+  const payload = (await response.json().catch(() => null)) as QwenEditResponse | null;
+  if (!response.ok) {
+    throw new Error(payload?.message ?? `Qwen respondió con estado ${response.status}.`);
+  }
+
+  const image = payload?.output?.choices?.[0]?.message?.content?.find((item) => item.image || item.image_url || item.url);
+  const url = image?.image ?? image?.image_url ?? image?.url;
+  if (!url) throw new Error('Qwen completó sin devolver imagen.');
+  return url;
+}
+
+// ===== Kling =====
+
+type KlingResponse = {
+  data?: { task_id?: string };
+  code?: string;
+  message?: string;
+};
+
+type KlingTaskResponse = {
+  data?: { task_status?: string; images?: Array<{ url?: string }> };
+  code?: string;
+  message?: string;
+};
+
+async function generateOneImageKling(apiKey: string, prompt: string, size: string): Promise<string> {
+  const submitResponse = await fetch(KLING_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ prompt, size }),
+  });
+
+  const submitPayload = (await submitResponse.json().catch(() => null)) as KlingResponse | null;
+  if (!submitResponse.ok || !submitPayload?.data?.task_id) {
+    throw new Error(submitPayload?.message ?? `Kling respondió con estado ${submitResponse.status}.`);
+  }
+
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+    await sleep(POLL_INTERVAL_MS);
+    const statusResponse = await fetch(`${KLING_API_URL}?task_id=${submitPayload.data.task_id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const statusPayload = (await statusResponse.json().catch(() => null)) as KlingTaskResponse | null;
+    if (!statusResponse.ok) {
+      throw new Error(statusPayload?.message ?? `No se pudo consultar Kling (${statusResponse.status}).`);
+    }
+    if (statusPayload?.data?.task_status === 'SUCCESS') {
+      const url = statusPayload.data.images?.[0]?.url;
+      if (!url) throw new Error('Kling completó sin devolver imagen.');
+      return url;
+    }
+    if (statusPayload?.data?.task_status === 'FAILED') {
+      throw new Error(statusPayload.message ?? 'Kling falló al generar la imagen.');
+    }
+  }
+
+  throw new Error('Kling tardó demasiado.');
+}
+
 // ===== Main Handler =====
 
 export async function POST(request: Request) {
@@ -182,7 +327,8 @@ export async function POST(request: Request) {
   }
 
   const style = typeof body?.style === 'string' ? body.style : 'Realista';
-  const model = 'higgsfield';
+  const requestedModel = typeof body?.model === 'string' ? body.model : 'higgsfield';
+  const model = ['higgsfield', 'qwen', 'kling'].includes(requestedModel) ? requestedModel : 'higgsfield';
   const aspectRatio = body?.aspectRatio as string;
   const rawCount = typeof body?.count === 'number' ? body.count : Number(body?.count);
   const count = [1, 2, 4].includes(rawCount) ? rawCount : 1;
@@ -190,7 +336,7 @@ export async function POST(request: Request) {
 
   try {
     if (body?.soulId) {
-      if (model !== 'higgsfield' || typeof body.soulId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(body.soulId)) return json({ error: 'Los avatares deben generarse con su identidad de Soul.' }, 400);
+      if (model !== 'higgsfield' || typeof body.soulId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(body.soulId)) return json({ error: 'Los avatares con identidad Soul solo se pueden generar con Higgsfield.' }, 400);
       const apiKey = process.env.HIGGSFIELD_API_KEY;
       if (!apiKey) return json({ error: 'Soul no está configurado.' }, 501);
       const authHeader = `Key ${apiKey}`;
@@ -203,7 +349,34 @@ export async function POST(request: Request) {
       }
       return json({ images: await retainImages(images, new URL(request.url).origin) });
     }
+    if (referenceImage && model === 'qwen') {
+      const apiKey = process.env.QWEN_API_KEY;
+      if (!apiKey) return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
+      const fullPrompt = `${style}: ${prompt}`;
+      const size = QWEN_SIZE_MAP[aspectRatio] ?? '1024*1024';
+      const results = await Promise.allSettled(
+        Array.from({ length: count }, () => editOneImageQwen(apiKey, referenceImage, fullPrompt, size)),
+      );
+      const images = results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      if (!images.length) {
+        const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo editar la imagen.';
+        return json({ error: message }, 502);
+      }
+      return json({ images: await retainImages(images, new URL(request.url).origin) });
+    }
+
+    if (referenceImage && model === 'kling') {
+      return json({ error: 'Kling no edita imágenes de referencia en este flujo. Selecciona Qwen para editar con referencia.' }, 400);
+    }
+
     if (referenceImage && model === 'higgsfield') {
+      const requestOrigin = new URL(request.url).origin;
+      if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(requestOrigin)) {
+        return json({ error: 'Higgsfield necesita una URL pública para leer referencias. En local usa Qwen o despliega la app.' }, 400);
+      }
       const apiKey = process.env.HIGGSFIELD_API_KEY;
       if (!apiKey) {
         return json({ error: 'HIGGSFIELD_API_KEY no está configurada.' }, 501);
@@ -221,6 +394,44 @@ export async function POST(request: Request) {
       if (!images.length) {
         const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
         const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo generar la imagen.';
+        return json({ error: message }, 502);
+      }
+      return json({ images: await retainImages(images, new URL(request.url).origin) });
+    }
+
+    if (model === 'qwen') {
+      const apiKey = process.env.QWEN_API_KEY;
+      if (!apiKey) return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
+      const size = QWEN_SIZE_MAP[aspectRatio] ?? '1024*1024';
+      const fullPrompt = `${style}: ${prompt}`;
+      const results = await Promise.allSettled(
+        Array.from({ length: count }, () => generateOneImageQwen(apiKey, fullPrompt, size)),
+      );
+      const images = results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      if (!images.length) {
+        const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo generar.';
+        return json({ error: message }, 502);
+      }
+      return json({ images: await retainImages(images, new URL(request.url).origin) });
+    }
+
+    if (model === 'kling') {
+      const apiKey = process.env.KLING_API_KEY;
+      if (!apiKey) return json({ error: 'KLING_API_KEY no está configurada.' }, 501);
+      const size = KLING_SIZE_MAP[aspectRatio] ?? '1024x1024';
+      const fullPrompt = `${style}: ${prompt}`;
+      const results = await Promise.allSettled(
+        Array.from({ length: count }, () => generateOneImageKling(apiKey, fullPrompt, size)),
+      );
+      const images = results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      if (!images.length) {
+        const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo generar.';
         return json({ error: message }, 502);
       }
       return json({ images: await retainImages(images, new URL(request.url).origin) });
