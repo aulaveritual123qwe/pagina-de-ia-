@@ -72,9 +72,16 @@ const QWEN_EDIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/
 const KLING_API_URL = 'https://api.klingai.com/v1/images/generations';
 
 function json(body: Record<string, unknown>, status = 200) {
+  if (typeof body.error === 'string') {
+    const message = body.error;
+    if (/inappropriate|sensitive|policy|moderation|nsfw|violation/i.test(message)) body.error = 'No se pudo procesar este contenido. Revisa el texto y la referencia.';
+    else if (/timed? ?out|timeout|aborted/i.test(message)) body.error = 'La conexión tardó demasiado. Vuelve a consultar tu generación pendiente.';
+    else if (/internal error|reference =/i.test(message)) body.error = 'El servicio de generación tuvo un error temporal. Inténtalo de nuevo más tarde.';
+    else if (/Qwen|QWEN|Higgsfield|Kling|Wan|DashScope|api.key|model.*not|invalid.*model/i.test(message)) body.error = 'El servicio de generación no pudo completar la solicitud. Contacta al administrador.';
+  }
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 }
 
@@ -103,7 +110,7 @@ async function createJob(tasks: JobTask[]): Promise<string> {
 
 async function submitHiggsfield(endpoint: string, authHeader: string, payload: Record<string, unknown>): Promise<JobTask> {
   const response = await fetch(endpoint, {
-    method: 'POST',
+    method: 'POST', signal: AbortSignal.timeout(180000),
     headers: { 'Content-Type': 'application/json', Authorization: authHeader },
     body: JSON.stringify(payload),
   });
@@ -146,7 +153,41 @@ function describeProviderError(message: string | undefined, fallback: string): s
   if (message && /inappropriate|sensitive|policy|moderation|nsfw|violation/i.test(message)) {
     return 'El proveedor rechazó esta generación por su política de contenido. Revisa el texto del prompt y la imagen de referencia, y vuelve a intentarlo con otro contenido.';
   }
+  if (message && /rate limit|too many requests|throttl|429/i.test(message)) {
+    return 'El proveedor está recibiendo demasiadas peticiones. Espera unos segundos y vuelve a intentarlo, o genera menos imágenes a la vez.';
+  }
   return message ?? fallback;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Providers rate-limit bursts, so submissions are staggered rather than fired at once,
+// and a throttled submission is retried with backoff before giving up.
+async function submitAll(count: number, submit: () => Promise<JobTask>): Promise<JobTask[]> {
+  const tasks: JobTask[] = [];
+  for (let index = 0; index < count; index += 1) {
+    if (index > 0) await sleep(700);
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        tasks.push(await submit());
+        lastError = undefined;
+        break;
+      } catch (error) {
+        lastError = error;
+        const message = error instanceof Error ? error.message : '';
+        if (!/demasiadas peticiones|rate limit|too many requests|throttl|429/i.test(message)) break;
+        await sleep(1500 * (attempt + 1));
+      }
+    }
+    if (lastError) {
+      if (tasks.length) break; // keep whatever was accepted instead of failing the batch
+      throw lastError;
+    }
+  }
+  return tasks;
 }
 
 // One status check per still-pending task: at most `count` subrequests per poll.
@@ -167,14 +208,15 @@ async function checkTask(task: JobTask): Promise<JobTask> {
     }
     if (task.kind === 'qwen') {
       const apiKey = process.env.QWEN_API_KEY;
-      const response = await fetch(`${QWEN_TASK_URL}/${task.ref}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      const response = await fetch(`${QWEN_TASK_URL}/${task.ref}`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(25000) });
       const data = (await response.json().catch(() => null)) as QwenTaskResponse | null;
       if (!response.ok) return { ...task, error: describeProviderError(data?.message, `Qwen respondió ${response.status}.`) };
       if (data?.output?.task_status === 'SUCCEEDED') {
         const url = data.output.results?.[0]?.url;
         return url ? { ...task, url } : { ...task, error: 'Qwen completó sin devolver imagen.' };
       }
-      if (data?.output?.task_status === 'FAILED') return { ...task, error: describeProviderError(data.message, 'Qwen falló al generar la imagen.') };
+      if (['FAILED', 'CANCELED', 'UNKNOWN'].includes(data?.output?.task_status ?? '')) return { ...task, error: describeProviderError(data?.message, 'No se pudo generar la imagen.') };
+      if (!['PENDING', 'RUNNING'].includes(data?.output?.task_status ?? '')) return { ...task, error: 'No se recibió un estado válido de la generación.' };
       return task;
     }
     const apiKey = process.env.KLING_API_KEY;
@@ -251,8 +293,9 @@ type QwenEditResponse = {
   message?: string;
 };
 
-async function editOneImageQwen(apiKey: string, referenceImage: string, prompt: string, size: string): Promise<string> {
+async function editOneImageQwen(apiKey: string, referenceImage: string | null, prompt: string, size: string, count: number): Promise<string[]> {
   const response = await fetch(QWEN_EDIT_URL, {
+    signal: AbortSignal.timeout(180000),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -264,11 +307,11 @@ async function editOneImageQwen(apiKey: string, referenceImage: string, prompt: 
         messages: [
           {
             role: 'user',
-            content: [{ image: referenceImage }, { text: prompt }],
+            content: [...(referenceImage ? [{ image: referenceImage }] : []), { text: prompt }],
           },
         ],
       },
-      parameters: { n: 1, negative_prompt: ' ', prompt_extend: true, watermark: false, size },
+      parameters: { n: count, prompt_extend: true, watermark: false, size },
     }),
   });
 
@@ -277,10 +320,9 @@ async function editOneImageQwen(apiKey: string, referenceImage: string, prompt: 
     throw new Error(payload?.message ?? `Qwen respondió con estado ${response.status}.`);
   }
 
-  const image = payload?.output?.choices?.[0]?.message?.content?.find((item) => item.image || item.image_url || item.url);
-  const url = image?.image ?? image?.image_url ?? image?.url;
-  if (!url) throw new Error('Qwen completó sin devolver imagen.');
-  return url;
+  const images = (payload?.output?.choices ?? []).flatMap(choice => (choice.message?.content ?? []).map(item => item.image ?? item.image_url ?? item.url).filter((url): url is string => !!url));
+  if (!images.length) throw new Error('No se recibió ninguna imagen.');
+  return images;
 }
 
 // ===== Kling =====
@@ -344,22 +386,12 @@ export async function POST(request: Request) {
       }
       return json({ jobId: await createJob(tasks) });
     }
-    if (referenceImage && model === 'qwen') {
+    if (model === 'qwen') {
       const apiKey = process.env.QWEN_API_KEY;
       if (!apiKey) return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
       const fullPrompt = buildPrompt(prompt);
       const size = QWEN_SIZE_MAP[aspectRatio] ?? '1024*1024';
-      const results = await Promise.allSettled(
-        Array.from({ length: count }, () => editOneImageQwen(apiKey, referenceImage, fullPrompt, size)),
-      );
-      const images = results
-        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
-        .map((result) => result.value);
-      if (!images.length) {
-        const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-        const message = firstError?.reason instanceof Error ? firstError.reason.message : 'No se pudo editar la imagen.';
-        return json({ error: message }, 502);
-      }
+      const images = await editOneImageQwen(apiKey, referenceImage, fullPrompt, size, count);
       return json({ images: await retainImages(images, new URL(request.url).origin) });
     }
 
@@ -380,18 +412,7 @@ export async function POST(request: Request) {
       const higgsfieldRatio = HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1';
       const fullPrompt = buildPrompt(prompt);
       const referenceUrl = await publishReferenceImage(referenceImage, new URL(request.url).origin);
-      const tasks = await Promise.all(
-        Array.from({ length: count }, () => submitHiggsfield(HIGGSFIELD_REFERENCE_URL, authHeader, { prompt: fullPrompt, image_reference_url: referenceUrl, aspect_ratio: higgsfieldRatio })),
-      );
-      return json({ jobId: await createJob(tasks) });
-    }
-
-    if (model === 'qwen') {
-      const apiKey = process.env.QWEN_API_KEY;
-      if (!apiKey) return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
-      const size = QWEN_SIZE_MAP[aspectRatio] ?? '1024*1024';
-      const fullPrompt = buildPrompt(prompt);
-      const tasks = await Promise.all(Array.from({ length: count }, () => submitQwen(apiKey, fullPrompt, size)));
+      const tasks = await submitAll(count, () => submitHiggsfield(HIGGSFIELD_REFERENCE_URL, authHeader, { prompt: fullPrompt, image_reference_url: referenceUrl, aspect_ratio: higgsfieldRatio }));
       return json({ jobId: await createJob(tasks) });
     }
 
@@ -400,7 +421,7 @@ export async function POST(request: Request) {
       if (!apiKey) return json({ error: 'KLING_API_KEY no está configurada.' }, 501);
       const size = KLING_SIZE_MAP[aspectRatio] ?? '1024x1024';
       const fullPrompt = buildPrompt(prompt);
-      const tasks = await Promise.all(Array.from({ length: count }, () => submitKling(apiKey, fullPrompt, size)));
+      const tasks = await submitAll(count, () => submitKling(apiKey, fullPrompt, size));
       return json({ jobId: await createJob(tasks) });
     }
 
@@ -412,9 +433,7 @@ export async function POST(request: Request) {
     const higgsfieldRatio = HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1';
     const authHeader = `Key ${apiKey}`;
     const fullPrompt = buildPrompt(prompt);
-    const tasks = await Promise.all(
-      Array.from({ length: count }, () => submitHiggsfield(HIGGSFIELD_SUBMIT_URL, authHeader, { prompt: fullPrompt, aspect_ratio: higgsfieldRatio, image_url: '' })),
-    );
+    const tasks = await submitAll(count, () => submitHiggsfield(HIGGSFIELD_SUBMIT_URL, authHeader, { prompt: fullPrompt, aspect_ratio: higgsfieldRatio, image_url: '' }));
     return json({ jobId: await createJob(tasks) });
   } catch (error) {
     return json(

@@ -17,6 +17,13 @@ const WAN_RATIO_MAP: Record<string, string> = {
 };
 
 function json(body: Record<string, unknown>, status = 200) {
+  if (typeof body.error === 'string') {
+    const message = body.error;
+    if (/inappropriate|sensitive|policy|moderation|nsfw|violation/i.test(message)) body.error = 'No se pudo procesar este contenido. Revisa el texto y la referencia.';
+    else if (/timed? ?out|timeout|aborted/i.test(message)) body.error = 'La conexión tardó demasiado. Vuelve a consultar tu generación pendiente.';
+    else if (/internal error|reference =/i.test(message)) body.error = 'El servicio de generación tuvo un error temporal. Inténtalo de nuevo más tarde.';
+    else if (/Qwen|QWEN|Higgsfield|Kling|Wan|DashScope|api.key|model.*not|invalid.*model/i.test(message)) body.error = 'El servicio de generación no pudo completar la solicitud. Contacta al administrador.';
+  }
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
@@ -28,6 +35,7 @@ type SubmitBody = {
   aspectRatio?: unknown;
   duration?: unknown;
   model?: unknown;
+  mode?: unknown;
   referenceImage?: unknown;
 };
 
@@ -44,7 +52,7 @@ type WanTaskResponse = {
 export async function POST(request: Request) {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
-    return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
+    return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
   }
 
   const body = (await request.json().catch(() => null)) as SubmitBody | null;
@@ -55,11 +63,11 @@ export async function POST(request: Request) {
 
   const rawDuration = typeof body?.duration === 'number' ? body.duration : Number(body?.duration);
   const duration = body?.duration === undefined ? 5 : rawDuration;
-  if (![5, 10, 15].includes(duration)) {
-    return json({ error: 'Elige una duración de 5, 10 o 15 segundos.' }, 400);
+  if (![5, 10, 12].includes(duration)) {
+    return json({ error: 'Elige una duración de 5, 10 o 12 segundos. El máximo es 12 segundos.' }, 400);
   }
 
-  const isImageToVideo = body?.model === 'wan-i2v';
+  const isImageToVideo = body?.mode === 'image' || body?.model === 'wan-i2v';
   const referenceImage = typeof body?.referenceImage === 'string' && body.referenceImage.length > 0 ? body.referenceImage : null;
   if (isImageToVideo && !referenceImage) {
     return json({ error: 'Sube una imagen para animarla.' }, 400);
@@ -85,6 +93,7 @@ export async function POST(request: Request) {
   try {
     const submitResponse = await fetch(WAN_SUBMIT_URL, {
       method: 'POST',
+      signal: AbortSignal.timeout(35000),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
@@ -107,7 +116,7 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
-    return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
+    return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
   }
 
   const taskId = new URL(request.url).searchParams.get('taskId');
@@ -118,6 +127,7 @@ export async function GET(request: Request) {
   try {
     const statusResponse = await fetch(`${WAN_TASK_URL}/${taskId}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(25000),
     });
     const payload = (await statusResponse.json().catch(() => null)) as WanTaskResponse | null;
 

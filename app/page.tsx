@@ -76,11 +76,6 @@ const media = [
   '/assets/creator-portrait-3.png',
 ];
 
-const IMAGE_MODEL_OPTIONS = [
-  { id: 'higgsfield', label: 'Higgsfield', detail: 'Soul y fotorrealismo', icon: Sparkles },
-  { id: 'qwen', label: 'Qwen', detail: 'Editar con referencia', icon: WandSparkles },
-  { id: 'kling', label: 'Kling', detail: 'Imagen experimental', icon: Zap },
-];
 
 const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: 'inicio', label: 'Inicio', icon: Home },
@@ -145,7 +140,7 @@ export default function HomePage() {
   const [quality, setQuality] = useState('Alta');
   const [imageCount, setImageCount] = useState('4');
   const model = 'higgsfield';
-  const [specialImageModel, setSpecialImageModel] = useState('qwen');
+  const specialImageModel = 'qwen';
   // "Contenido especial" keeps its own prompt/settings/results so it never mixes
   // with "Crear Imagen" — they're two separate workspaces that happen to share UI.
   const [specialPrompt, setSpecialPrompt] = useState('');
@@ -385,7 +380,7 @@ export default function HomePage() {
         aspectRatio: ratio,
         quality,
         count: amount,
-        model: 'higgsfield',
+        model: avatar?.soulId ? 'higgsfield' : 'qwen',
         referenceImage: avatar?.soulId ? undefined : avatar?.referenceImage ?? referenceImage?.dataUrl,
         soulId: avatar?.soulId,
       });
@@ -586,8 +581,6 @@ export default function HomePage() {
               imageCount={specialImageCount}
               setImageCount={setSpecialImageCount}
               model={specialImageModel}
-              setModel={setSpecialImageModel}
-              showModelPicker
               isGenerating={specialIsGenerating}
               onGenerate={handleGenerateSpecial}
               results={specialResults}
@@ -1062,36 +1055,6 @@ function SegmentedField({ label, value, onChange, options }: { label: string; va
   );
 }
 
-function ModelField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <div className="field-block image-model-field">
-      <span className="field-label">Modelo IA</span>
-      <div className="model-picker" role="radiogroup" aria-label="Modelo de imagen">
-        {IMAGE_MODEL_OPTIONS.map((option) => {
-          const Icon = option.icon;
-          const selected = option.id === value;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              className={`model-card ${selected ? 'is-selected' : ''}`}
-              onClick={() => onChange(option.id)}
-            >
-              <span className="model-card-icon"><Icon size={18} /></span>
-              <span className="model-card-copy">
-                <strong>{option.label}</strong>
-                <small>{option.detail}</small>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImage?: string }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const referenceInput = useRef<HTMLInputElement>(null);
@@ -1189,8 +1152,6 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImag
           </Step>
 
           <Step title="Ajustes de imagen" number="3">
-
-            {props.showModelPicker && props.setModel && <ModelField value={props.model} onChange={props.setModel} />}
             <div className="settings-grid">
               <SelectField label="Estilo" value={props.style} onChange={props.setStyle} options={['Realista', 'Editorial', 'Cinematográfico', 'Ilustración']} />
               <SegmentedField label="Calidad" value={props.quality} onChange={props.setQuality} options={['Estándar', 'Alta', 'Ultra']} />
@@ -1199,7 +1160,7 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImag
               <RatioField value={props.ratio} onChange={props.setRatio} />
               <SegmentedField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} />
             </div>
-            {props.referenceImage && <p className="reference-note">{props.model === 'qwen' ? 'Qwen editará tu referencia directamente desde esta sesión local.' : props.model === 'higgsfield' ? 'Higgsfield necesita una URL pública para leer referencias; en local usa Qwen.' : 'Kling genera desde texto en este flujo; usa Qwen para editar referencias.'}</p>}
+            {props.referenceImage && <p className="reference-note">Usaremos tu referencia para conservar la apariencia del personaje.</p>}
           </Step>
 
           <div className="generation-summary">
@@ -1594,7 +1555,7 @@ const IMAGE_CREDIT_COST = 15;
 const VIDEO_CREDIT_COST_BY_DURATION: Record<string, number> = {
   '5 segundos': 120,
   '10 segundos': 240,
-  '15 segundos': 360,
+  '12 segundos': 288,
 };
 
 const VIDEO_POLL_INTERVAL_MS = 5000;
@@ -1626,7 +1587,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
       if (cancelRef.current) throw new Error('cancelled');
       await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_INTERVAL_MS));
       if (cancelRef.current) throw new Error('cancelled');
-      const response = await fetch(`/api/generate-video?taskId=${encodeURIComponent(taskId)}`, { cache: 'no-store' });
+      const response = await fetch(`/api/generate-video?taskId=${encodeURIComponent(taskId)}`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
       const data = (await response.json().catch(() => null)) as { status?: string; url?: string; error?: string } | null;
       if (!response.ok) throw new Error(data?.error ?? 'No se pudo consultar el estado del video.');
       if (data?.status === 'SUCCEEDED' && data.url) return data.url;
@@ -1655,13 +1616,14 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
       let taskId = pendingTask?.id;
       if (!taskId) {
       const submitResponse = await fetch('/api/generate-video', {
+        signal: AbortSignal.timeout(45000),
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: videoPrompt,
           aspectRatio: ratio,
           duration: Number.parseInt(duration, 10),
-          model: isImageMode ? 'wan-i2v' : 'wan-t2v',
+          mode: isImageMode ? 'image' : 'text',
           referenceImage: isImageMode ? refImage?.dataUrl : undefined,
         }),
       });
@@ -1679,7 +1641,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
       onSpendCredits(cost, 'Video generado correctamente con IA.');
     } catch (error) {
       if (error instanceof Error && error.message === 'cancelled') return;
-      setErrorMessage(error instanceof Error ? error.message : 'No se pudo generar el video. Inténtalo nuevamente.');
+      setErrorMessage(error instanceof Error && error.name === 'TimeoutError' ? 'La conexión tardó demasiado. Si el video ya está pendiente, pulsa Consultar video para recuperar el resultado.' : error instanceof Error ? error.message : 'No se pudo generar el video. Inténtalo nuevamente.');
       onNotify(error instanceof Error ? error.message : 'No se pudo generar el video. Inténtalo nuevamente.');
     } finally {
       busyRef.current = false;
@@ -1691,8 +1653,8 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
   return (
     <div className="view-stack">
       {!hideHeading && <PageHeading eyebrow="ESTUDIO DE VIDEO" title="Generar Video con IA" description="Describe una escena y conviértela en un video con inteligencia artificial." note="Ideas que se mueven" />}
-      <SegmentedField label="Herramienta de video" value={studioMode} onChange={setStudioMode} options={['Generar video', 'Kling Motion Control']} />
-      <div hidden={studioMode !== 'Kling Motion Control'}><MotionControlView /></div>
+      <SegmentedField label="Herramienta de video" value={studioMode} onChange={setStudioMode} options={['Generar video', 'Control de movimiento']} />
+      <div hidden={studioMode !== 'Control de movimiento'}><MotionControlView /></div>
       <section className="video-coming-card" style={studioMode !== 'Generar video' ? { display: 'none' } : undefined}>
         <div className="video-coming-copy">
           <span><Video size={24} /></span>
@@ -1748,7 +1710,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
           </label>
           <div className="video-prompt-help" id="video-prompt-help"><span>Incluye el lugar, la luz y la acción.</span><span>{videoPrompt.length}/2000</span></div>
           <div className="settings-grid">
-            <SelectField label="Duración" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos', '15 segundos']} />
+            <SelectField label="Duración · máximo 12 segundos" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos', '12 segundos']} />
             {isImageMode ? <p>Formato del video: se conserva el formato de la imagen de referencia.</p> : <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} />}
           </div>
           </fieldset>
@@ -1935,9 +1897,9 @@ function MotionControlView() {
           video.preload = 'metadata';
           video.onloadedmetadata = () => {
             duration = video.duration;
-            const valid = duration >= 3 && duration <= 30 && video.videoWidth >= 340 && video.videoHeight >= 340 && video.videoWidth <= 3850 && video.videoHeight <= 3850;
+            const valid = duration >= 3 && duration <= 12 && video.videoWidth >= 340 && video.videoHeight >= 340 && video.videoWidth <= 3850 && video.videoHeight <= 3850;
             video.removeAttribute('src'); video.load();
-            valid ? resolve() : reject(new Error('Usa un video de 3 a 30 segundos y entre 340 y 3850 px por lado.'));
+            valid ? resolve() : reject(new Error('Usa un video de 3 a 12 segundos y entre 340 y 3850 px por lado.'));
           };
           video.onerror = () => reject(new Error('No se pudo leer el video. Usa MP4 o MOV.'));
           video.src = preview;
@@ -1979,20 +1941,20 @@ function MotionControlView() {
   }
   return <section className="video-coming-card">
     <div className="video-coming-copy">
-      <h2>Kling Motion Control</h2><p>Transfiere los movimientos de un video a tu personaje.</p>
+      <h2>Control de movimiento</h2><p>Transfiere los movimientos de un video a tu personaje.</p>
       <fieldset className="video-fields" disabled={busy || !!task || uploading}>
         <div className="motion-reference-grid">
           <label className="motion-upload"><span><ImageIcon size={18} /> Imagen del personaje</span>{imageUrl ? <img src={imageUrl} alt="Personaje de referencia" /> : <div className="motion-upload-placeholder"><Upload size={26} /><strong>Sube tu personaje</strong><small>JPG, PNG o WebP</small></div>}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { const file=event.target.files?.[0]; event.target.value=''; if(file) void uploadReference(file,'image'); }} /><small>{imageName || 'Hasta 20 MB · mínimo 340 px por lado'}</small></label>
-          <label className="motion-upload"><span><Video size={18} /> Video de movimiento</span>{videoUrl ? <video src={videoUrl} controls playsInline preload="metadata" /> : <div className="motion-upload-placeholder"><Upload size={26} /><strong>Añade el movimiento</strong><small>MP4 o MOV · 3–30 segundos</small></div>}<input type="file" accept="video/mp4,video/quicktime" onChange={(event) => { const file=event.target.files?.[0]; event.target.value=''; if(file) void uploadReference(file,'video'); }} /><small>{videoName || 'Hasta 20 MB'}</small></label>
+          <label className="motion-upload"><span><Video size={18} /> Video de movimiento</span>{videoUrl ? <video src={videoUrl} controls playsInline preload="metadata" /> : <div className="motion-upload-placeholder"><Upload size={26} /><strong>Añade el movimiento</strong><small>MP4 o MOV · 3–12 segundos</small></div>}<input type="file" accept="video/mp4,video/quicktime" onChange={(event) => { const file=event.target.files?.[0]; event.target.value=''; if(file) void uploadReference(file,'video'); }} /><small>{videoName || 'Hasta 20 MB'}</small></label>
         </div>
         <label className="video-prompt-label">Descripción de la escena<Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={2500} /></label>
         <SelectField label="Orientación del personaje" value={orientation} onChange={setOrientation} options={['Video de referencia', 'Imagen del personaje']} />
         <SelectField label="Calidad" value={quality} onChange={setQuality} options={['Estándar', 'Profesional']} />
         <label className="motion-sound"><Switch checked={sound} onCheckedChange={setSound} /> Conservar audio original</label>
-        <p>{orientation === 'Video de referencia' ? 'Video de 3 a 30 segundos.' : 'Video de 3 a 10 segundos.'} El formato sigue la referencia; no se recorta la vista previa.</p>
+        <p>{orientation === 'Video de referencia' ? 'Video de 3 a 12 segundos.' : 'Video de 3 a 10 segundos.'} El formato sigue la referencia; no se recorta la vista previa.</p>
       </fieldset>
       <Button className="video-generate-button" onClick={generate} disabled={busy || uploading || (!task && (!imageUrl || !videoUrl))}>{uploading ? 'Subiendo referencia…' : busy ? <><LoaderCircle className="spin" /> Generando movimiento…</> : task ? 'Consultar resultado' : 'Generar movimiento'}</Button>
-      {busy && <p role="status">Kling está procesando las referencias. Mantén esta página abierta.</p>}
+      {busy && <p role="status">Estamos procesando las referencias. Mantén esta página abierta.</p>}
       {error && <div className="video-error" role="alert">{error}</div>}
     </div>
     <div className="video-result">{result ? <><video className="motion-result" src={result} controls playsInline /><a href={result} target="_blank" rel="noopener noreferrer">Abrir y guardar video</a></> : <div className="motion-empty"><Video size={32} /><h3>Tu personaje, en movimiento</h3><p>El resultado aparecerá aquí al completar la generación.</p></div>}</div>

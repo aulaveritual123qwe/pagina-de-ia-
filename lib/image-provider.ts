@@ -23,6 +23,7 @@ const MAX_POLL_MINUTES = 6;
 async function requestLiveImages(request: ImageRequest): Promise<string[]> {
   const response = await fetch('/api/generate-image', {
     method: 'POST',
+    signal: AbortSignal.timeout(240000),
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   });
@@ -39,7 +40,7 @@ async function requestLiveImages(request: ImageRequest): Promise<string[]> {
   const attempts = Math.ceil((MAX_POLL_MINUTES * 60_000) / POLL_INTERVAL_MS);
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-    const statusResponse = await fetch(`/api/generate-image?jobId=${encodeURIComponent(data.jobId)}`, { cache: 'no-store' });
+    const statusResponse = await fetch(`/api/generate-image?jobId=${encodeURIComponent(data.jobId)}`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
     const status = (await statusResponse.json().catch(() => null)) as
       | { status?: string; images?: string[]; error?: string }
       | null;
@@ -51,6 +52,10 @@ async function requestLiveImages(request: ImageRequest): Promise<string[]> {
 }
 
 export async function generateImages(request: ImageRequest): Promise<ImageGenerationResult> {
-  const images = await requestLiveImages(request);
+  let images: string[];
+  try { images = await requestLiveImages(request); } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') throw new Error('La generación tardó demasiado en responder. No se descontaron créditos.');
+    throw error;
+  }
   return { images, source: 'live' };
 }

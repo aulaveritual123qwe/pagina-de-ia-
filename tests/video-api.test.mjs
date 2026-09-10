@@ -10,7 +10,7 @@ test('video API validates requests and handles asynchronous provider outcomes', 
   try {
     globalThis.fetch = async () => { throw new Error('Invalid input must not call provider'); };
     assert.equal((await POST(request({ prompt: 'ab' }))).status, 400);
-    assert.equal((await POST(request({ prompt: 'Coffee scene', duration: 8 }))).status, 400);
+    for (const duration of [8, 13, 15, -1]) assert.equal((await POST(request({ prompt: 'Coffee scene', duration }))).status, 400);
     assert.equal((await POST(request({ prompt: 'Coffee scene', aspectRatio: 'invalid' }))).status, 400);
     assert.equal((await GET(new Request('http://localhost/api/generate-video?taskId=../secret'))).status, 400);
     globalThis.fetch = async (_url, options) => {
@@ -20,6 +20,14 @@ test('video API validates requests and handles asynchronous provider outcomes', 
       return Response.json({ output: { task_id: 'test-task' } });
     };
     assert.deepEqual(await (await POST(request({ prompt: 'Coffee scene', duration: 10, aspectRatio: '16:9' }))).json(), { taskId: 'test-task' });
+    globalThis.fetch = async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.parameters.duration, 12);
+      assert.ok(options.signal);
+      assert.ok(body.input.media[0].url);
+      return Response.json({ output: { task_id: 'image-task' } });
+    };
+    assert.equal((await POST(request({ prompt: 'Animate the scene', mode: 'image', duration: 12, referenceImage: 'data:image/png;base64,test' }))).status, 200);
     for (const status of ['PENDING', 'RUNNING', 'FAILED', 'CANCELED', 'UNKNOWN', 'SUCCEEDED']) {
       globalThis.fetch = async () => Response.json({ output: { task_status: status, video_url: 'https://example.com/video.mp4' } });
       const response = await GET(new Request('http://localhost/api/generate-video?taskId=test-task'));
