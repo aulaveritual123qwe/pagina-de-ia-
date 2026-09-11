@@ -1,3 +1,5 @@
+import { env } from 'cloudflare:workers';
+
 export const dynamic = 'force-dynamic';
 
 // Video generation takes 1-5 minutes, too long for a single Worker invocation to
@@ -7,6 +9,7 @@ export const dynamic = 'force-dynamic';
 const WAN_SUBMIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis';
 const WAN_TASK_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/tasks';
 const WAN_I2V_MODEL = 'wan2.7-i2v-2026-04-25';
+const A2E_API_BASE = 'https://video.a2e.ai';
 
 // Wan2.7 accepts ratio directly; map the UI's aspect ratio options to supported values.
 const WAN_RATIO_MAP: Record<string, string> = {
@@ -15,6 +18,27 @@ const WAN_RATIO_MAP: Record<string, string> = {
   '9:16': '9:16',
   '16:9': '16:9',
 };
+
+type KVNamespaceLike = {
+  put: (key: string, value: ArrayBuffer, options?: { expirationTtl?: number; metadata?: Record<string, unknown> }) => Promise<void>;
+};
+
+async function publishReferenceImage(dataUrl: string, origin: string): Promise<string> {
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
+  if (!match) return dataUrl;
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(origin)) {
+    throw new Error('Para animar una imagen con A2E, la app debe estar desplegada para que A2E pueda leer la referencia.');
+  }
+  const [, mimeType, base64] = match;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+
+  const id = crypto.randomUUID();
+  const kv = (env as unknown as { IMAGE_CACHE: KVNamespaceLike }).IMAGE_CACHE;
+  await kv.put(id, bytes.buffer as ArrayBuffer, { expirationTtl: 3600, metadata: { mimeType } });
+  return `${origin}/api/image/${id}`;
+}
 
 function json(body: Record<string, unknown>, status = 200) {
   if (typeof body.error === 'string') {
@@ -49,12 +73,28 @@ type WanTaskResponse = {
   message?: string;
 };
 
-export async function POST(request: Request) {
-  const apiKey = process.env.QWEN_API_KEY;
-  if (!apiKey) {
-    return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
-  }
+type A2EStartResponse = {
+  data?: { _id?: string; task_id?: string; taskId?: string };
+  task_id?: string;
+  taskId?: string;
+  message?: string;
+  error?: string;
+};
 
+type A2EVideoTaskResponse = {
+  data?: { current_status?: string; result_url?: string; failed_message?: string };
+  current_status?: string;
+  status?: string;
+  result_url?: string;
+  message?: string;
+  error?: string;
+};
+
+function extractA2ETaskId(payload: A2EStartResponse | null): string | null {
+  return payload?.data?._id ?? payload?.data?.task_id ?? payload?.data?.taskId ?? payload?.task_id ?? payload?.taskId ?? null;
+}
+
+export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as SubmitBody | null;
   const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
   if (!prompt || prompt.length < 3 || prompt.length > 2000) {
@@ -71,6 +111,38 @@ export async function POST(request: Request) {
   const referenceImage = typeof body?.referenceImage === 'string' && body.referenceImage.length > 0 ? body.referenceImage : null;
   if (isImageToVideo && !referenceImage) {
     return json({ error: 'Sube una imagen para animarla.' }, 400);
+  }
+
+  const a2eToken = process.env.A2E_API_TOKEN;
+  if (isImageToVideo && a2eToken) {
+    try {
+      const imageUrl = await publishReferenceImage(referenceImage as string, new URL(request.url).origin);
+      const submitResponse = await fetch(`${A2E_API_BASE}/api/v1/userImage2Video/start`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(35000),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${a2eToken}` },
+        body: JSON.stringify({
+          name: 'Creators Academy',
+          image_url: imageUrl,
+          prompt,
+          negative_prompt: 'low quality, distorted face, bad hands, extra fingers, text artifacts',
+          duration,
+        }),
+      });
+      const payload = (await submitResponse.json().catch(() => null)) as A2EStartResponse | null;
+      const taskId = extractA2ETaskId(payload);
+      if (!submitResponse.ok || !taskId) {
+        return json({ error: payload?.message ?? payload?.error ?? `El proveedor respondió con estado ${submitResponse.status}.` }, 502);
+      }
+      return json({ taskId: `a2e:${taskId}` });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
+    }
+  }
+
+  const apiKey = process.env.QWEN_API_KEY;
+  if (!apiKey) {
+    return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
   }
 
   const ratio = body?.aspectRatio === undefined ? '9:16' : WAN_RATIO_MAP[body.aspectRatio as string];
@@ -114,14 +186,43 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const taskId = new URL(request.url).searchParams.get('taskId');
+  if (!taskId || !/^[a-zA-Z0-9:-]{1,120}$/.test(taskId)) {
+    return json({ error: 'El identificador del video no es válido.' }, 400);
+  }
+
+  if (taskId.startsWith('a2e:')) {
+    const a2eToken = process.env.A2E_API_TOKEN;
+    if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
+    const externalId = taskId.slice(4);
+    try {
+      const statusResponse = await fetch(`${A2E_API_BASE}/api/v1/userImage2Video/${externalId}`, {
+        headers: { Authorization: `Bearer ${a2eToken}` },
+        signal: AbortSignal.timeout(25000),
+      });
+      const payload = (await statusResponse.json().catch(() => null)) as A2EVideoTaskResponse | null;
+      if (!statusResponse.ok) return json({ error: payload?.message ?? payload?.error ?? `No se pudo consultar el estado (${statusResponse.status}).` }, 502);
+      const status = payload?.data?.current_status ?? payload?.current_status ?? payload?.status;
+      if (['completed', 'COMPLETED', 'SUCCESS', 'SUCCEEDED'].includes(status ?? '')) {
+        const url = payload?.data?.result_url ?? payload?.result_url;
+        if (!url) return json({ error: 'El proveedor completó la tarea sin devolver un video.' }, 502);
+        return json({ status: 'SUCCEEDED', url });
+      }
+      if (['failed', 'FAILED', 'CANCELED', 'CANCELLED', 'UNKNOWN'].includes(status ?? '')) {
+        return json({ status: 'FAILED', error: payload?.data?.failed_message ?? payload?.message ?? 'La generación de video falló.' });
+      }
+      if (!['sent', 'pending', 'PENDING', 'RUNNING', 'PROCESSING', 'QUEUED'].includes(status ?? '')) {
+        return json({ error: 'El proveedor no devolvió un estado válido. Vuelve a consultar el video.' }, 502);
+      }
+      return json({ status: 'RUNNING' });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
+    }
+  }
+
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
-  }
-
-  const taskId = new URL(request.url).searchParams.get('taskId');
-  if (!taskId || !/^[a-zA-Z0-9-]{1,100}$/.test(taskId)) {
-    return json({ error: 'El identificador del video no es válido.' }, 400);
   }
 
   try {

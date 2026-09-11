@@ -24,6 +24,10 @@ async function publishReferenceImage(dataUrl: string, origin: string): Promise<s
   return `${origin}/api/image/${id}`;
 }
 
+function isLocalOrigin(origin: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(origin);
+}
+
 type GenerateImageBody = {
   prompt?: unknown;
   style?: unknown;
@@ -61,6 +65,14 @@ const KLING_SIZE_MAP: Record<string, string> = {
   '16:9': '1344x768',
 };
 
+const A2E_SIZE_MAP: Record<string, { width: number; height: number }> = {
+  '1:1': { width: 1024, height: 1024 },
+  '4:5': { width: 928, height: 1152 },
+  '3:4': { width: 768, height: 1024 },
+  '9:16': { width: 768, height: 1344 },
+  '16:9': { width: 1344, height: 768 },
+};
+
 const HIGGSFIELD_SUBMIT_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard';
 // Character-consistent generation from a single reference photo (needs a real public URL, no data: URIs).
 const HIGGSFIELD_REFERENCE_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/reference';
@@ -90,7 +102,7 @@ function json(body: Record<string, unknown>, status = 200) {
 // subrequests, shared across the whole batch). So POST only submits and hands back a
 // jobId; the browser polls GET, and each poll is a fresh invocation with its own budget.
 
-type JobTask = { kind: 'higgsfield' | 'qwen' | 'kling'; ref: string; url?: string; error?: string };
+type JobTask = { kind: 'higgsfield' | 'qwen' | 'kling' | 'a2e-text' | 'a2e-nano'; ref: string; url?: string; error?: string };
 type Job = { tasks: JobTask[] };
 
 type JobKV = KVNamespaceLike & {
@@ -145,6 +157,70 @@ async function submitKling(apiKey: string, prompt: string, size: string): Promis
     throw new Error(describeProviderError(data?.message, `Kling respondió con estado ${response.status}.`));
   }
   return { kind: 'kling', ref: data.data.task_id };
+}
+
+const A2E_API_BASE = 'https://video.a2e.ai';
+
+type A2EStartResponse = {
+  data?: { _id?: string; task_id?: string; taskId?: string };
+  task_id?: string;
+  taskId?: string;
+  message?: string;
+  error?: string;
+};
+
+type A2ETaskResponse = {
+  data?: {
+    _id?: string;
+    current_status?: string;
+    images?: string[] | Array<{ url?: string }>;
+    image_urls?: string[];
+    outputs?: string[] | Array<{ url?: string }>;
+    result?: string | { url?: string };
+    result_url?: string;
+    failed_message?: string;
+  };
+  current_status?: string;
+  status?: string;
+  images?: string[] | Array<{ url?: string }>;
+  image_urls?: string[];
+  outputs?: string[] | Array<{ url?: string }>;
+  result?: string | { url?: string };
+  result_url?: string;
+  message?: string;
+  error?: string;
+};
+
+function extractA2ETaskId(payload: A2EStartResponse | null): string | null {
+  return payload?.data?._id ?? payload?.data?.task_id ?? payload?.data?.taskId ?? payload?.task_id ?? payload?.taskId ?? null;
+}
+
+function extractA2EUrls(payload: A2ETaskResponse | null): string[] {
+  const raw = payload?.data?.image_urls ?? payload?.data?.images ?? payload?.data?.outputs ?? payload?.image_urls ?? payload?.images ?? payload?.outputs ?? [];
+  const urls = Array.isArray(raw)
+    ? raw.map((item) => (typeof item === 'string' ? item : item?.url)).filter((url): url is string => !!url)
+    : [];
+  const result = payload?.data?.result ?? payload?.result;
+  if (typeof result === 'string') urls.push(result);
+  else if (result?.url) urls.push(result.url);
+  const resultUrl = payload?.data?.result_url ?? payload?.result_url;
+  if (resultUrl) urls.push(resultUrl);
+  return urls;
+}
+
+async function submitA2E(apiToken: string, kind: 'a2e-text' | 'a2e-nano', endpoint: string, payload: Record<string, unknown>): Promise<JobTask> {
+  const response = await fetch(`${A2E_API_BASE}${endpoint}`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(35000),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = (await response.json().catch(() => null)) as A2EStartResponse | null;
+  const taskId = extractA2ETaskId(data);
+  if (!response.ok || !taskId) {
+    throw new Error(describeProviderError(data?.message ?? data?.error, `A2E respondió con estado ${response.status}.`));
+  }
+  return { kind, ref: taskId };
 }
 
 // Providers reject prompts and reference images that fail their content policy. Their
@@ -217,6 +293,21 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       }
       if (['FAILED', 'CANCELED', 'UNKNOWN'].includes(data?.output?.task_status ?? '')) return { ...task, error: describeProviderError(data?.message, 'No se pudo generar la imagen.') };
       if (!['PENDING', 'RUNNING'].includes(data?.output?.task_status ?? '')) return { ...task, error: 'No se recibió un estado válido de la generación.' };
+      return task;
+    }
+    if (task.kind === 'a2e-text' || task.kind === 'a2e-nano') {
+      const apiToken = process.env.A2E_API_TOKEN;
+      const endpoint = task.kind === 'a2e-text' ? `/api/v1/userText2image/${task.ref}` : `/api/v1/userNanoBanana/detail/${task.ref}`;
+      const response = await fetch(`${A2E_API_BASE}${endpoint}`, { headers: { Authorization: `Bearer ${apiToken}` }, signal: AbortSignal.timeout(25000) });
+      const data = (await response.json().catch(() => null)) as A2ETaskResponse | null;
+      if (!response.ok) return { ...task, error: describeProviderError(data?.message ?? data?.error, `El servicio respondió ${response.status}.`) };
+      const status = data?.data?.current_status ?? data?.current_status ?? data?.status;
+      if (['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'completed'].includes(status ?? '')) {
+        const url = extractA2EUrls(data)[0];
+        return url ? { ...task, url } : { ...task, error: 'El servicio completó sin devolver imagen.' };
+      }
+      if (['FAILED', 'FAILURE', 'failed', 'CANCELED', 'CANCELLED', 'UNKNOWN'].includes(status ?? '')) return { ...task, error: describeProviderError(data?.data?.failed_message ?? data?.message ?? data?.error, 'No se pudo generar la imagen.') };
+      if (!['PENDING', 'RUNNING', 'PROCESSING', 'QUEUED', 'sent', 'pending'].includes(status ?? '')) return { ...task, error: 'No se recibió un estado válido de la generación.' };
       return task;
     }
     const apiKey = process.env.KLING_API_KEY;
@@ -387,6 +478,30 @@ export async function POST(request: Request) {
       return json({ jobId: await createJob(tasks) });
     }
     if (model === 'qwen') {
+      const a2eToken = process.env.A2E_API_TOKEN;
+      if (a2eToken && (!referenceImage || !isLocalOrigin(new URL(request.url).origin))) {
+        const { width, height } = A2E_SIZE_MAP[aspectRatio] ?? A2E_SIZE_MAP['1:1'];
+        const fullPrompt = buildPrompt(prompt);
+        const a2eReferenceImage = referenceImage ? await publishReferenceImage(referenceImage, new URL(request.url).origin) : null;
+        const tasks = await submitAll(count, () => {
+          if (a2eReferenceImage) {
+            return submitA2E(a2eToken, 'a2e-nano', '/api/v1/userNanoBanana/start', {
+              name: 'Creators Academy',
+              prompt: fullPrompt,
+              input_images: [a2eReferenceImage],
+            });
+          }
+          return submitA2E(a2eToken, 'a2e-text', '/api/v1/userText2image/start', {
+            name: 'Creators Academy',
+            prompt: fullPrompt,
+            req_key: 'high_aes_general_v21_L',
+            width,
+            height,
+          });
+        });
+        return json({ jobId: await createJob(tasks) });
+      }
+
       const apiKey = process.env.QWEN_API_KEY;
       if (!apiKey) return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
       const fullPrompt = buildPrompt(prompt);
