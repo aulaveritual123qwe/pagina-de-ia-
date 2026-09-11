@@ -12,6 +12,11 @@ const WAN_I2V_MODEL = 'wan2.7-i2v-2026-04-25';
 const A2E_API_BASE = 'https://video.a2e.ai';
 const KLING_API_BASE = 'https://api.klingai.com/v1/videos';
 
+function secret(name: string): string | undefined {
+  const workerEnv = env as unknown as Record<string, string | undefined>;
+  return process.env[name] ?? workerEnv[name];
+}
+
 // Wan2.7 accepts ratio directly; map the UI's aspect ratio options to supported values.
 const WAN_RATIO_MAP: Record<string, string> = {
   '1:1': '1:1',
@@ -113,16 +118,17 @@ function extractA2ETaskId(payload: A2EStartResponse | null): string | null {
 }
 
 async function klingAuthorization() {
-  const access = process.env.KLING_ACCESS_KEY;
-  const secret = process.env.KLING_SECRET_KEY;
-  if (!access || !secret) {
-    if (process.env.KLING_API_KEY) return `Bearer ${process.env.KLING_API_KEY}`;
+  const access = secret('KLING_ACCESS_KEY');
+  const secretKey = secret('KLING_SECRET_KEY');
+  if (!access || !secretKey) {
+    const apiKey = secret('KLING_API_KEY');
+    if (apiKey) return `Bearer ${apiKey}`;
     throw new Error('La generación de video no está configurada. Contacta al administrador.');
   }
   const encode = (value: string) => btoa(value).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   const now = Math.floor(Date.now() / 1000);
   const unsigned = `${encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${encode(JSON.stringify({ iss: access, exp: now + 1800, nbf: now - 5 }))}`;
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secretKey), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(unsigned)));
   return `Bearer ${unsigned}.${encode(String.fromCharCode(...signature))}`;
 }
@@ -152,7 +158,7 @@ export async function POST(request: Request) {
     return json({ error: 'Elige un formato válido.' }, 400);
   }
 
-  const a2eToken = process.env.A2E_API_TOKEN;
+  const a2eToken = secret('A2E_API_TOKEN');
   if (provider === 'a2e') {
     if (!isImageToVideo) return json({ error: 'Contenido especial genera video desde una imagen de referencia.' }, 400);
     if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
@@ -182,7 +188,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (!process.env.KLING_API_KEY && (!process.env.KLING_ACCESS_KEY || !process.env.KLING_SECRET_KEY)) {
+    if (!secret('KLING_API_KEY') && (!secret('KLING_ACCESS_KEY') || !secret('KLING_SECRET_KEY'))) {
       return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     }
     const auth = await klingAuthorization();
@@ -206,7 +212,7 @@ export async function POST(request: Request) {
     return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
   }
 
-  const apiKey = process.env.QWEN_API_KEY;
+  const apiKey = secret('QWEN_API_KEY');
   if (!apiKey) {
     return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
   }
@@ -255,7 +261,7 @@ export async function GET(request: Request) {
   }
 
   if (taskId.startsWith('a2e:')) {
-    const a2eToken = process.env.A2E_API_TOKEN;
+    const a2eToken = secret('A2E_API_TOKEN');
     if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     const externalId = taskId.slice(4);
     try {
@@ -306,7 +312,7 @@ export async function GET(request: Request) {
     }
   }
 
-  const apiKey = process.env.QWEN_API_KEY;
+  const apiKey = secret('QWEN_API_KEY');
   if (!apiKey) {
     return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
   }
