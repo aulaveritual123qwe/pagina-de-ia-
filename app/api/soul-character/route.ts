@@ -9,8 +9,12 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 export async function POST(request: Request) {
   try {
     const body = await request.json() as { name?: unknown; references?: unknown };
+    const origin = new URL(request.url).origin;
     if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > 40 || !Array.isArray(body.references) || body.references.length < 5 || body.references.length > 10 || body.references.some((url: unknown) => typeof url !== 'string' || !url.startsWith(`${new URL(request.url).origin}/api/image/`))) {
       return json({ error: 'Indica un nombre y entre 5 y 10 referencias subidas del mismo avatar.' }, 400);
+    }
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(origin)) {
+      return json({ error: 'Para crear avatares con Soul, abre la versión publicada. Soul necesita leer tus referencias desde una URL pública, no desde localhost.' }, 400);
     }
     const response = await fetch(`${BASE}/v1/custom-references`, { method: 'POST', headers: headers(), body: JSON.stringify({ name: body.name.trim(), input_images: body.references.map((url: string) => ({ type: 'image_url', image_url: url })) }) });
     const data = await response.json() as { id?: string; status?: string };
