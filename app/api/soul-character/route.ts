@@ -1,5 +1,5 @@
 export const dynamic = 'force-dynamic';
-const BASE = 'https://api.higgsfield.ai';
+const BASE = 'https://platform.higgsfield.ai';
 function headers() {
   const key = process.env.HIGGSFIELD_API_KEY;
   if (!key) throw new Error('Higgsfield Soul no está configurado.');
@@ -17,8 +17,14 @@ export async function POST(request: Request) {
       return json({ error: 'Para crear avatares con Soul, abre la versión publicada. Soul necesita leer tus referencias desde una URL pública, no desde localhost.' }, 400);
     }
     const response = await fetch(`${BASE}/v1/custom-references`, { method: 'POST', headers: headers(), body: JSON.stringify({ name: body.name.trim(), input_images: body.references.map((url: string) => ({ type: 'image_url', image_url: url })) }) });
-    const data = await response.json() as { id?: string; status?: string };
-    if (!response.ok || !data.id) return json({ error: 'Soul no pudo registrar el avatar. Revisa el acceso a Soul ID de tu cuenta.' }, 502);
+    const data = await response.json() as { id?: string; status?: string; detail?: string; message?: string; error?: string };
+    const upstreamMessage = `${data.detail ?? data.message ?? data.error ?? ''}`.toLowerCase();
+    if (!response.ok || !data.id) {
+      if (response.status === 403 && upstreamMessage.includes('not enough credits')) {
+        return json({ error: 'La cuenta API de Soul/Higgsfield no tiene créditos suficientes. Recarga créditos en Higgsfield para poder crear el avatar.' }, 402);
+      }
+      return json({ error: 'Soul no pudo registrar el avatar. Revisa el acceso a Soul ID de tu cuenta.' }, 502);
+    }
     return json({ id: data.id, status: data.status });
   } catch { return json({ error: 'No se pudo conectar con Soul. Inténtalo nuevamente.' }, 502); }
 }
