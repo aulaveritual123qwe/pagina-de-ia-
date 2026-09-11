@@ -1732,3 +1732,29 @@ body:has(.special-theme) [data-slot="select-item"][data-highlighted] { backgroun
 }
 
 .special-theme .page-heading h1 { letter-spacing: -0.04em; }
+
+
+/* --- Avatar selection and folders --- */
+.avatar-select-list { display: grid; gap: 10px; }
+.avatar-select-list .avatar-selector { width: 100%; }
+.avatar-selector.is-selected { border-color: #8f52ff; box-shadow: 0 0 0 3px rgb(112 39 247 / 10%); }
+.avatar-selector:disabled { opacity: 0.58; cursor: not-allowed; }
+.result-download { display: inline-flex; width: 100%; justify-content: center; margin-top: 12px; position: static; min-height: 42px; }
+.avatar-folder-section { border-radius: 20px; padding: 22px; background: linear-gradient(180deg, #071120 0%, #081326 100%); border: 1px solid rgb(133 92 255 / 18%); box-shadow: 0 18px 50px rgb(3 8 18 / 28%); }
+.avatar-folder-section h2 { color: #fff; margin: 0; }
+.avatar-folder-section p { color: #b9c3d7; margin: 6px 0 0; }
+.avatar-folder-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
+.avatar-folder-card { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #243653; border-radius: 14px; background: #0d182b; color: #fff; }
+.avatar-folder-card.is-active { border-color: #8f52ff; background: #131d35; }
+.avatar-folder-card img { width: 58px; height: 70px; border-radius: 10px; object-fit: cover; }
+.avatar-folder-card div, .avatar-folder-mini { display: flex; flex-direction: column; gap: 3px; }
+.avatar-folder-card small, .avatar-folder-mini { color: #b9c3d7; font-size: 12px; }
+.avatar-folder-empty { grid-column: 1 / -1; padding: 14px; border-radius: 12px; background: #0d182b; }
+.avatar-folder-mini { flex-direction: row; align-items: center; margin: 8px 0 14px; }
+.admin-access-card { margin-top: 18px; padding: 16px; border-radius: 14px; background: #f7f4ff; border: 1px solid rgb(112 39 247 / 14%); }
+.admin-access-card h2 { margin: 0 0 6px; font-size: 18px; }
+.admin-access-card p { margin: 0 0 12px; color: #687086; font-size: 13px; line-height: 1.45; }
+.admin-access-card label { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; color: #36394a; font-size: 13px; font-weight: 650; }
+.admin-access-card input { height: 42px; border: 1px solid rgb(16 24 40 / 10%); border-radius: 9px; padding: 0 12px; background: #fff; color: #16192a; }
+.reference-mosaic { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 760px) { .reference-mosaic { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
