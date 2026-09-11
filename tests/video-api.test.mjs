@@ -30,7 +30,16 @@ test('video API validates requests and uses A2E for image-to-video', async () =>
       assert.equal(body.aspect_ratio, '16:9');
       return Response.json({ data: { task_id: 'test-task' } });
     };
-    assert.deepEqual(await (await POST(request({ prompt: 'Coffee scene', duration: 10, aspectRatio: '16:9' }))).json(), { taskId: 'kling:test-task' });
+    assert.deepEqual(await (await POST(request({ prompt: 'Coffee scene', duration: 10, aspectRatio: '16:9' }))).json(), { taskId: 'kling:text:test-task' });
+
+    globalThis.fetch = async (_url, options) => {
+      assert.equal(String(_url), 'https://api.klingai.com/v1/videos/image2video');
+      const body = JSON.parse(options.body);
+      assert.ok(body.image.startsWith('https://studio.example/api/image/'));
+      assert.equal(body.image_url, undefined);
+      return Response.json({ data: { task_id: 'image-kling-task' } });
+    };
+    assert.deepEqual(await (await POST(request({ prompt: 'Walk forward', duration: 5, mode: 'image', referenceImage: 'data:image/png;base64,dGVzdA==' }))).json(), { taskId: 'kling:image:image-kling-task' });
 
     globalThis.fetch = async (url, options) => {
       assert.equal(String(url), 'https://video.a2e.ai/api/v1/userImage2Video/start');
@@ -52,7 +61,7 @@ test('video API validates requests and uses A2E for image-to-video', async () =>
     }
 
     globalThis.fetch = async () => Response.json({ data: { task_status: 'succeed', task_result: { videos: [{ url: 'https://example.com/video.mp4' }] } } });
-    const response = await GET(new Request('https://studio.example/api/generate-video?taskId=kling:test-task'));
+    const response = await GET(new Request('https://studio.example/api/generate-video?taskId=kling:text:test-task'));
     assert.equal((await response.json()).url, 'https://example.com/video.mp4');
 
     delete process.env.KLING_API_KEY;

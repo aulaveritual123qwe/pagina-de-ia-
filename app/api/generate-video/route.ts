@@ -193,7 +193,7 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(35000),
       headers: { 'Content-Type': 'application/json', Authorization: auth },
       body: JSON.stringify(isImageToVideo
-        ? { model_name: 'kling-v2-6', image_url: imageUrl, prompt, mode: 'pro', duration: String(duration) }
+        ? { model_name: 'kling-v2-6', image: imageUrl, prompt, mode: 'pro', duration: String(duration) }
         : { model_name: 'kling-v2-6', prompt, aspect_ratio: ratio, mode: 'pro', duration: String(duration) }),
     });
     const payload = (await submitResponse.json().catch(() => null)) as KlingSubmitResponse | null;
@@ -201,7 +201,7 @@ export async function POST(request: Request) {
     if (!submitResponse.ok || payload?.code || !taskId) {
       return json({ error: payload?.message ?? `El proveedor respondió con estado ${submitResponse.status}.` }, 502);
     }
-    return json({ taskId: `kling:${taskId}` });
+    return json({ taskId: `kling:${isImageToVideo ? 'image' : 'text'}:${taskId}` });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
   }
@@ -250,7 +250,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   const taskId = new URL(request.url).searchParams.get('taskId');
-  if (!taskId || !/^[a-zA-Z0-9:-]{1,120}$/.test(taskId)) {
+  if (!taskId || !/^[a-zA-Z0-9:_-]{1,140}$/.test(taskId)) {
     return json({ error: 'El identificador del video no es válido.' }, 400);
   }
 
@@ -284,9 +284,10 @@ export async function GET(request: Request) {
   }
 
   if (taskId.startsWith('kling:')) {
-    const externalId = taskId.slice(6);
+    const [, klingMode = 'text', externalId = ''] = taskId.split(':');
+    if (!externalId || !['image', 'text'].includes(klingMode)) return json({ error: 'El identificador del video no es válido.' }, 400);
     try {
-      const statusResponse = await fetch(`${KLING_API_BASE}/${externalId}`, {
+      const statusResponse = await fetch(`${KLING_API_BASE}/${klingMode === 'image' ? 'image2video' : 'text2video'}/${externalId}`, {
         headers: { Authorization: await klingAuthorization() },
         signal: AbortSignal.timeout(25000),
       });
