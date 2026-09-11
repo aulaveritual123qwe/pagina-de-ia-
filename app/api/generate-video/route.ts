@@ -17,6 +17,14 @@ function secret(name: string): string | undefined {
   return process.env[name] ?? workerEnv[name];
 }
 
+async function providerSecret(name: string): Promise<string | undefined> {
+  const direct = secret(name);
+  if (direct) return direct;
+  const kv = (env as unknown as { IMAGE_CACHE?: KVNamespaceLike }).IMAGE_CACHE;
+  const config = await kv?.get?.('admin:api-config', 'json').catch(() => null);
+  return typeof config?.[name] === 'string' ? config[name] : undefined;
+}
+
 // Wan2.7 accepts ratio directly; map the UI's aspect ratio options to supported values.
 const WAN_RATIO_MAP: Record<string, string> = {
   '1:1': '1:1',
@@ -27,6 +35,7 @@ const WAN_RATIO_MAP: Record<string, string> = {
 
 type KVNamespaceLike = {
   put: (key: string, value: ArrayBuffer, options?: { expirationTtl?: number; metadata?: Record<string, unknown> }) => Promise<void>;
+  get?: (key: string, type?: 'json') => Promise<Record<string, string> | null>;
 };
 
 async function publishReferenceImage(dataUrl: string, origin: string): Promise<string> {
@@ -118,10 +127,10 @@ function extractA2ETaskId(payload: A2EStartResponse | null): string | null {
 }
 
 async function klingAuthorization() {
-  const access = secret('KLING_ACCESS_KEY');
-  const secretKey = secret('KLING_SECRET_KEY');
+  const access = await providerSecret('KLING_ACCESS_KEY');
+  const secretKey = await providerSecret('KLING_SECRET_KEY');
   if (!access || !secretKey) {
-    const apiKey = secret('KLING_API_KEY');
+    const apiKey = await providerSecret('KLING_API_KEY');
     if (apiKey) return `Bearer ${apiKey}`;
     throw new Error('La generación de video no está configurada. Contacta al administrador.');
   }
@@ -158,7 +167,7 @@ export async function POST(request: Request) {
     return json({ error: 'Elige un formato válido.' }, 400);
   }
 
-  const a2eToken = secret('A2E_API_TOKEN');
+  const a2eToken = await providerSecret('A2E_API_TOKEN');
   if (provider === 'a2e') {
     if (!isImageToVideo) return json({ error: 'Contenido especial genera video desde una imagen de referencia.' }, 400);
     if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
@@ -189,7 +198,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (!secret('KLING_API_KEY') && (!secret('KLING_ACCESS_KEY') || !secret('KLING_SECRET_KEY'))) {
+    if (!await providerSecret('KLING_API_KEY') && (!await providerSecret('KLING_ACCESS_KEY') || !await providerSecret('KLING_SECRET_KEY'))) {
       return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     }
     const auth = await klingAuthorization();
@@ -213,7 +222,7 @@ export async function POST(request: Request) {
     return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
   }
 
-  const apiKey = secret('QWEN_API_KEY');
+  const apiKey = await providerSecret('QWEN_API_KEY');
   if (!apiKey) {
     return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
   }
@@ -262,7 +271,7 @@ export async function GET(request: Request) {
   }
 
   if (taskId.startsWith('a2e:')) {
-    const a2eToken = secret('A2E_API_TOKEN');
+    const a2eToken = await providerSecret('A2E_API_TOKEN');
     if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     const externalId = taskId.slice(4);
     try {
@@ -313,7 +322,7 @@ export async function GET(request: Request) {
     }
   }
 
-  const apiKey = secret('QWEN_API_KEY');
+  const apiKey = await providerSecret('QWEN_API_KEY');
   if (!apiKey) {
     return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
   }

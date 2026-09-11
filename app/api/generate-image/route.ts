@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 
 type KVNamespaceLike = {
   put: (key: string, value: ArrayBuffer, options?: { expirationTtl?: number; metadata?: Record<string, unknown> }) => Promise<void>;
+  get?: (key: string, type?: 'json') => Promise<Record<string, string> | null>;
 };
 
 // Higgsfield's soul/reference endpoint requires a real public URL (max 2083 chars),
@@ -31,6 +32,14 @@ function isLocalOrigin(origin: string): boolean {
 function secret(name: string): string | undefined {
   const workerEnv = env as unknown as Record<string, string | undefined>;
   return process.env[name] ?? workerEnv[name];
+}
+
+async function providerSecret(name: string): Promise<string | undefined> {
+  const direct = secret(name);
+  if (direct) return direct;
+  const kv = (env as unknown as { IMAGE_CACHE?: KVNamespaceLike }).IMAGE_CACHE;
+  const config = await kv?.get?.('admin:api-config', 'json').catch(() => null);
+  return typeof config?.[name] === 'string' ? config[name] : undefined;
 }
 
 type GenerateImageBody = {
@@ -276,7 +285,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
   if (task.url || task.error) return task;
   try {
     if (task.kind === 'higgsfield') {
-      const apiKey = secret('HIGGSFIELD_API_KEY');
+      const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
       const response = await fetch(task.ref, { headers: { Authorization: `Key ${apiKey}` } });
       const data = (await response.json().catch(() => null)) as HiggsfieldStatusResponse | null;
       if (!response.ok) return { ...task, error: describeProviderError(data?.error, `Higgsfield respondió ${response.status}.`) };
@@ -288,7 +297,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       return task;
     }
     if (task.kind === 'qwen') {
-      const apiKey = secret('QWEN_API_KEY');
+      const apiKey = await providerSecret('QWEN_API_KEY');
       const response = await fetch(`${QWEN_TASK_URL}/${task.ref}`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(25000) });
       const data = (await response.json().catch(() => null)) as QwenTaskResponse | null;
       if (!response.ok) return { ...task, error: describeProviderError(data?.message, `Qwen respondió ${response.status}.`) };
@@ -301,7 +310,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       return task;
     }
     if (task.kind === 'a2e-qwen') {
-      const apiToken = secret('A2E_API_TOKEN');
+      const apiToken = await providerSecret('A2E_API_TOKEN');
       if (!apiToken) return { ...task, error: 'La generación de contenido no está configurada. Contacta al administrador.' };
       const response = await fetch(`${A2E_API_BASE}/api/v1/userQwen2Image/detail/${task.ref}`, { headers: { Authorization: `Bearer ${apiToken}` }, signal: AbortSignal.timeout(25000) });
       const data = (await response.json().catch(() => null)) as A2ETaskResponse | null;
@@ -315,7 +324,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       if (!['PENDING', 'RUNNING', 'PROCESSING', 'QUEUED', 'sent', 'pending'].includes(status ?? '')) return { ...task, error: 'No se recibió un estado válido de la generación.' };
       return task;
     }
-    const apiKey = secret('KLING_API_KEY');
+    const apiKey = await providerSecret('KLING_API_KEY');
     const response = await fetch(`${KLING_API_URL}?task_id=${task.ref}`, { headers: { Authorization: `Bearer ${apiKey}` } });
     const data = (await response.json().catch(() => null)) as KlingTaskResponse | null;
     if (!response.ok) return { ...task, error: describeProviderError(data?.message, `Kling respondió ${response.status}.`) };
@@ -470,7 +479,7 @@ export async function POST(request: Request) {
   try {
     if (body?.soulId) {
       if (model !== 'higgsfield' || typeof body.soulId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(body.soulId)) return json({ error: 'Los avatares con identidad Soul solo se pueden generar con Higgsfield.' }, 400);
-      const apiKey = secret('HIGGSFIELD_API_KEY');
+      const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
       if (!apiKey) return json({ error: 'Soul no está configurado.' }, 501);
       const authHeader = `Key ${apiKey}`;
       const tasks: JobTask[] = [];
@@ -483,7 +492,7 @@ export async function POST(request: Request) {
       return json({ jobId: await createJob(tasks) });
     }
     if (model === 'qwen') {
-      const a2eToken = secret('A2E_API_TOKEN');
+      const a2eToken = await providerSecret('A2E_API_TOKEN');
       if (!a2eToken) return json({ error: 'La generación de contenido no está configurada. Contacta al administrador.' }, 501);
       if (referenceImage && isLocalOrigin(new URL(request.url).origin)) {
         return json({ error: 'Para usar una referencia con Contenido, abre la versión desplegada para que A2E pueda leer la imagen.' }, 400);
@@ -510,7 +519,7 @@ export async function POST(request: Request) {
       if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(requestOrigin)) {
         return json({ error: 'Higgsfield necesita una URL pública para leer referencias. En local usa Qwen o despliega la app.' }, 400);
       }
-      const apiKey = secret('HIGGSFIELD_API_KEY');
+      const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
       if (!apiKey) {
         return json({ error: 'HIGGSFIELD_API_KEY no está configurada.' }, 501);
       }
@@ -523,7 +532,7 @@ export async function POST(request: Request) {
     }
 
     if (model === 'kling') {
-      const apiKey = secret('KLING_API_KEY');
+      const apiKey = await providerSecret('KLING_API_KEY');
       if (!apiKey) return json({ error: 'KLING_API_KEY no está configurada.' }, 501);
       const size = KLING_SIZE_MAP[aspectRatio] ?? '1024x1024';
       const fullPrompt = buildPrompt(prompt);
@@ -532,7 +541,7 @@ export async function POST(request: Request) {
     }
 
     // Default: Higgsfield
-    const apiKey = secret('HIGGSFIELD_API_KEY');
+    const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
     if (!apiKey) {
       return json({ error: 'HIGGSFIELD_API_KEY no está configurada.' }, 501);
     }

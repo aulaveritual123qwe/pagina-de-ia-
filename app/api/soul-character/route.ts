@@ -1,7 +1,17 @@
+import { env } from 'cloudflare:workers';
 export const dynamic = 'force-dynamic';
 const BASE = 'https://platform.higgsfield.ai';
-function headers() {
-  const key = process.env.HIGGSFIELD_API_KEY;
+type Store = { get?: (key: string, type?: 'json') => Promise<Record<string, string> | null> };
+async function providerSecret(name: string): Promise<string | undefined> {
+  const workerEnv = env as unknown as Record<string, string | undefined>;
+  const direct = process.env[name] ?? workerEnv[name];
+  if (direct) return direct;
+  const kv = (env as unknown as { IMAGE_CACHE?: Store }).IMAGE_CACHE;
+  const config = await kv?.get?.('admin:api-config', 'json').catch(() => null);
+  return typeof config?.[name] === 'string' ? config[name] : undefined;
+}
+async function headers() {
+  const key = await providerSecret('HIGGSFIELD_API_KEY');
   if (!key) throw new Error('Higgsfield Soul no está configurado.');
   return { Authorization: `Key ${key}`, 'Content-Type': 'application/json' };
 }
@@ -16,7 +26,7 @@ export async function POST(request: Request) {
     if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(origin)) {
       return json({ error: 'Para crear avatares con Soul, abre la versión publicada. Soul necesita leer tus referencias desde una URL pública, no desde localhost.' }, 400);
     }
-    const response = await fetch(`${BASE}/v1/custom-references`, { method: 'POST', headers: headers(), body: JSON.stringify({ name: body.name.trim(), input_images: body.references.map((url: string) => ({ type: 'image_url', image_url: url })) }) });
+    const response = await fetch(`${BASE}/v1/custom-references`, { method: 'POST', headers: await headers(), body: JSON.stringify({ name: body.name.trim(), input_images: body.references.map((url: string) => ({ type: 'image_url', image_url: url })) }) });
     const data = await response.json() as { id?: string; status?: string; detail?: string; message?: string; error?: string };
     const upstreamMessage = `${data.detail ?? data.message ?? data.error ?? ''}`.toLowerCase();
     if (!response.ok || !data.id) {
@@ -32,7 +42,7 @@ export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get('id');
   if (!id || !/^[a-zA-Z0-9_-]{1,100}$/.test(id)) return json({ error: 'Identidad inválida.' }, 400);
   try {
-    const response = await fetch(`${BASE}/v1/custom-references/${id}`, { headers: headers() });
+    const response = await fetch(`${BASE}/v1/custom-references/${id}`, { headers: await headers() });
     const data = await response.json() as { id?: string; status?: string };
     if (!response.ok) return json({ error: 'No se pudo consultar el avatar. Vuelve a consultar sin crear otro.' }, 502);
     return json({ id: data.id, status: data.status });

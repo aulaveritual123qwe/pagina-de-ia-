@@ -1758,3 +1758,10 @@ body:has(.special-theme) [data-slot="select-item"][data-highlighted] { backgroun
 .admin-access-card input { height: 42px; border: 1px solid rgb(16 24 40 / 10%); border-radius: 9px; padding: 0 12px; background: #fff; color: #16192a; }
 .reference-mosaic { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 @media (max-width: 760px) { .reference-mosaic { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.api-admin-card { background: #f3f8ff; border-color: rgb(43 107 237 / 16%); }
+.api-status-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px; }
+.api-status-row span { border-radius: 999px; padding: 6px 10px; background: #eef1f7; color: #6b7280; font-size: 12px; font-weight: 700; }
+.api-status-row span.ready { background: #e7f8ef; color: #11834c; }
+.api-two-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 640px) { .api-two-cols { grid-template-columns: 1fr; } }

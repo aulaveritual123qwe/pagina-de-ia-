@@ -2006,6 +2006,8 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
   const [profile, setProfile] = useState({ name: profileName, email: accountEmail, language: 'Español', description: '' });
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPlan, setAdminPlan] = useState('Pro');
+  const [apiKeys, setApiKeys] = useState({ HIGGSFIELD_API_KEY: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '' });
+  const [apiStatus, setApiStatus] = useState({ soul: false, kling: false, a2e: false });
 
   useEffect(() => {
     const saved = window.localStorage.getItem('creator-profile');
@@ -2016,6 +2018,27 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
       if (storedProfile.name) onProfileNameChange(storedProfile.name);
     } catch { window.localStorage.removeItem('creator-profile'); }
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetch('/api/admin-apis', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data: { configured?: { soul?: boolean; kling?: boolean; a2e?: boolean } }) => setApiStatus({ soul: Boolean(data.configured?.soul), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e) }))
+      .catch(() => undefined);
+  }, [isAdmin]);
+
+  async function saveApiKeys() {
+    const response = await fetch('/api/admin-apis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminEmail: accountEmail, keys: apiKeys }),
+    });
+    const data = await response.json() as { configured?: { soul?: boolean; kling?: boolean; a2e?: boolean }; error?: string };
+    if (!response.ok) { onNotify(data.error ?? 'No se pudieron guardar las APIs.'); return; }
+    setApiStatus({ soul: Boolean(data.configured?.soul), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e) });
+    setApiKeys({ HIGGSFIELD_API_KEY: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '' });
+    onNotify('APIs vinculadas correctamente.');
+  }
 
   function saveProfile() {
     if (!profile.name.trim() || !profile.email.includes('@')) {
@@ -2045,6 +2068,17 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
               onGrantPlan?.(adminEmail.trim().toLowerCase(), adminPlan);
               setAdminEmail('');
             }}>Guardar acceso</Button>
+          </div>}
+
+          {isAdmin && <div className="admin-access-card api-admin-card">
+            <h2>APIs de generación</h2>
+            <p>Vincula las claves que usará la plataforma para Crear Imagen, Generar Video y Contenido. Las claves se guardan en el servidor y no se muestran completas.</p>
+            <div className="api-status-row"><span className={apiStatus.soul ? 'ready' : ''}>Soul/Higgsfield</span><span className={apiStatus.kling ? 'ready' : ''}>Kling video</span><span className={apiStatus.a2e ? 'ready' : ''}>A2E Contenido</span></div>
+            <label>Soul / Higgsfield API Key<input type="password" value={apiKeys.HIGGSFIELD_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, HIGGSFIELD_API_KEY: event.target.value })} placeholder="Key de Soul para crear avatares e imágenes" /></label>
+            <label>Kling API Key<input type="password" value={apiKeys.KLING_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_API_KEY: event.target.value })} placeholder="Bearer/API key de Kling" /></label>
+            <div className="api-two-cols"><label>Kling Access Key<input type="password" value={apiKeys.KLING_ACCESS_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_ACCESS_KEY: event.target.value })} /></label><label>Kling Secret Key<input type="password" value={apiKeys.KLING_SECRET_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_SECRET_KEY: event.target.value })} /></label></div>
+            <label>A2E API Token<input type="password" value={apiKeys.A2E_API_TOKEN} onChange={(event) => setApiKeys({ ...apiKeys, A2E_API_TOKEN: event.target.value })} placeholder="Token para Qwen/Wan en Contenido" /></label>
+            <Button type="button" onClick={saveApiKeys}>Vincular APIs</Button>
           </div>}
 
           <div className="account-actions">
