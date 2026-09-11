@@ -42,8 +42,10 @@ test('video API validates requests and uses A2E for image-to-video', async () =>
     assert.deepEqual(await (await POST(request({ prompt: 'Walk forward', duration: 5, mode: 'image', referenceImage: 'data:image/png;base64,dGVzdA==' }))).json(), { taskId: 'kling:image:image-kling-task' });
 
     globalThis.fetch = async (url, options) => {
-      assert.equal(String(url), 'https://video.a2e.ai/api/v1/userImage2Video/start');
+      assert.equal(String(url), 'https://video.a2e.ai/api/v1/userWanSpicy/start');
       const body = JSON.parse(options.body);
+      assert.equal(body.model, 'wan2.7-i2v-spicy');
+      assert.equal(body.resolution, '720p');
       assert.equal(body.duration, 10);
       assert.ok(body.image_url.startsWith('https://studio.example/api/image/'));
       return Response.json({ data: { _id: 'image-task' } });

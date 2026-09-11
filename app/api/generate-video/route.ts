@@ -164,15 +164,16 @@ export async function POST(request: Request) {
     if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     try {
       const imageUrl = await publishReferenceImage(referenceImage as string, new URL(request.url).origin);
-      const submitResponse = await fetch(`${A2E_API_BASE}/api/v1/userImage2Video/start`, {
+      const submitResponse = await fetch(`${A2E_API_BASE}/api/v1/userWanSpicy/start`, {
         method: 'POST',
         signal: AbortSignal.timeout(35000),
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${a2eToken}` },
         body: JSON.stringify({
-          name: 'Creators Academy',
-          image_url: imageUrl,
+          model: 'wan2.7-i2v-spicy',
+          name: 'video-avatar',
           prompt,
-          negative_prompt: 'low quality, distorted face, bad hands, extra fingers, text artifacts',
+          image_url: imageUrl,
+          resolution: '720p',
           duration,
         }),
       });
@@ -265,7 +266,7 @@ export async function GET(request: Request) {
     if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     const externalId = taskId.slice(4);
     try {
-      const statusResponse = await fetch(`${A2E_API_BASE}/api/v1/userImage2Video/${externalId}`, {
+      const statusResponse = await fetch(`${A2E_API_BASE}/api/v1/userWanSpicy/${externalId}`, {
         headers: { Authorization: `Bearer ${a2eToken}` },
         signal: AbortSignal.timeout(25000),
       });

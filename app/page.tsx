@@ -17,7 +17,6 @@ import {
   Image as ImageIcon,
   Lock,
   Library,
-  LayoutTemplate,
   LoaderCircle,
   LogOut,
   Mail,
@@ -47,7 +46,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { generateImages } from '@/lib/image-provider';
 
-type View = 'inicio' | 'creaciones' | 'avatares' | 'crear' | 'video' | 'especial' | 'plantillas' | 'biblioteca' | 'planes' | 'ajustes';
+type View = 'inicio' | 'creaciones' | 'avatares' | 'crear' | 'video' | 'especial' | 'biblioteca' | 'planes' | 'ajustes';
 
 type ModelContext = {
   registerTool: (
@@ -83,8 +82,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: 'avatares', label: 'Mis Avatares', icon: Users },
   { id: 'crear', label: 'Crear Imagen', icon: WandSparkles },
   { id: 'video', label: 'Generar Video', icon: Video },
-  { id: 'especial', label: 'Contenido especial', icon: Sparkles },
-  { id: 'plantillas', label: 'Plantillas', icon: LayoutTemplate },
+  { id: 'especial', label: 'Contenido', icon: Sparkles },
   { id: 'biblioteca', label: 'Biblioteca', icon: Library },
   { id: 'planes', label: 'Planes y Créditos', icon: Coins },
   { id: 'ajustes', label: 'Configuración', icon: Settings },
@@ -142,7 +140,7 @@ export default function HomePage() {
   const [imageCount, setImageCount] = useState('4');
   const model = 'higgsfield';
   const specialImageModel = 'qwen';
-  // "Contenido especial" keeps its own prompt/settings/results so it never mixes
+  // "Contenido" keeps its own prompt/settings/results so it never mixes
   // with "Crear Imagen" — they're two separate workspaces that happen to share UI.
   const [specialPrompt, setSpecialPrompt] = useState('');
   const [specialStyle, setSpecialStyle] = useState('Realista');
@@ -407,7 +405,7 @@ export default function HomePage() {
     }
   }
 
-  // Independent generation flow for "Contenido especial" — separate prompt, settings
+  // Independent generation flow for "Contenido" — separate prompt, settings
   // and results from "Crear Imagen" so the two never mix.
   async function handleGenerateSpecial() {
     if (!specialPrompt.trim() || specialIsGenerating) return;
@@ -529,7 +527,7 @@ export default function HomePage() {
         <main className="content-area" aria-label={activeLabel}>
           {view === 'especial' && (
             <div className="special-content-heading view-stack">
-              <PageHeading eyebrow="ESTUDIO CREATIVO" title="Contenido especial" description="Crea imágenes y genera videos en un solo lugar." note="Imagina · Crea · Comparte" />
+              <PageHeading eyebrow="ESTUDIO CREATIVO" title="Contenido" description="Crea imágenes y genera videos en un solo lugar." note="Imagina · Crea · Comparte" />
               <div className="special-content-modes" role="group" aria-label="Tipo de contenido">
                 {['Crear imagen', 'Generar video'].map((mode) => (
                   <Button key={mode} type="button" variant={specialMode === mode ? 'default' : 'outline'} aria-pressed={specialMode === mode} onClick={() => setSpecialMode(mode)}>
@@ -612,7 +610,6 @@ export default function HomePage() {
           )}
           <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="kling" /></div>
           <div hidden={view !== 'especial' || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="a2e" /></div>
-          {view === 'plantillas' && <TemplatesView onUseTemplate={useTemplate} />}
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
           {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 700); notify('Se añadieron 700 créditos (recarga de US$9.90).'); }} />}
           {view === 'ajustes' && (
@@ -1672,7 +1669,7 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
       <div className="avatar-page-toolbar">
         <div><strong>Estás en el plan {plan}</strong><span>{plan === 'Free' ? 'Puedes tener 1 avatar activo. Mejora a Pro para desbloquear hasta 3.' : 'Tienes acceso a todos tus avatares.'}</span></div>
         <div className="avatar-page-toolbar-actions">
-          <button type="button" className="link-button" onClick={() => onNavigate('planes')}>{plan === 'Free' ? 'Mejorar a Pro' : 'Gestionar plan'}</button>
+          <button type="button" className="link-button pro-upgrade-button" onClick={() => onNavigate('planes')}>{plan === 'Free' ? 'Mejorar a Pro' : 'Gestionar plan'}</button>
           <Button type="button" onClick={onCreateCharacter}><Sparkles size={16} /> Crear personaje</Button>
         </div>
       </div>

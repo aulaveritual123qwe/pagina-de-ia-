@@ -1712,3 +1712,23 @@ body:has(.special-theme) [data-slot="select-item"][data-highlighted] { backgroun
   .reference-mosaic { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .soul-flow-grid, .avatar-examples-strip > div { grid-template-columns: 1fr 1fr; }
 }
+
+
+/* --- Avatar page CTA polish --- */
+.avatar-page-toolbar-actions { gap: 10px; }
+.avatar-page-toolbar-actions .pro-upgrade-button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid rgb(112 39 247 / 22%);
+  border-radius: 10px;
+  background: #fff;
+  color: #6f28ec;
+  box-shadow: 0 8px 18px rgb(112 39 247 / 10%);
+}
+.avatar-page-toolbar-actions .pro-upgrade-button:hover {
+  color: #fff;
+  background: linear-gradient(100deg, #6723ed, #d91476);
+  border-color: transparent;
+}
+
+.special-theme .page-heading h1 { letter-spacing: -0.04em; }

@@ -24,7 +24,7 @@ test('image generation uses A2E jobs and hides service errors', async () => {
         posted.push({ url: String(url), body: JSON.parse(options.body) });
         return Response.json({ data: { _id: `task-${posted.length}` } });
       }
-      if (String(url).includes('/api/v1/userText2image/')) {
+      if (String(url).includes('/api/v1/userQwen2Image/detail/')) {
         return Response.json({ data: { current_status: 'completed', image_urls: ['https://example.com/1.png'] } });
       }
       return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } });
@@ -33,9 +33,9 @@ test('image generation uses A2E jobs and hides service errors', async () => {
     const created = await POST(request({ prompt: 'Create a portrait', model: 'qwen', count: 1 }));
     assert.equal(created.status, 200);
     assert.match((await created.json()).jobId, /^[a-f0-9-]+$/i);
-    assert.equal(posted[0].url, 'https://video.a2e.ai/api/v1/userText2image/start');
-    assert.equal(posted[0].body.req_key, 'high_aes_general_v21_L');
-    assert.equal(posted[0].body.width, 1024);
+    assert.equal(posted[0].url, 'https://video.a2e.ai/api/v1/userQwen2Image/start');
+    assert.equal(posted[0].body.model, 'qwen-image-2.0-pro');
+    assert.equal(posted[0].body.size, '1024*1024');
 
     const completed = await GET(new Request('https://studio.example/api/generate-image?jobId=test'));
     assert.equal(completed.status, 200);
@@ -44,14 +44,16 @@ test('image generation uses A2E jobs and hides service errors', async () => {
     globalThis.fetch = async (_url, options) => {
       const body = JSON.parse(options.body);
       assert.ok(body.input_images[0].startsWith('https://studio.example/api/image/'));
-      return Response.json({ data: { _id: 'nano-task' } });
+      assert.equal(body.model, 'qwen-image-2.0-pro');
+      assert.ok(body.input_images[0].startsWith('https://studio.example/api/image/'));
+      return Response.json({ data: { _id: 'qwen-task' } });
     };
     const nano = await POST(request({ prompt: 'Change the background', model: 'qwen', referenceImage: 'data:image/png;base64,dGVzdA==', count: 1 }));
     assert.equal(nano.status, 200);
 
     globalThis.fetch = async () => Response.json({ message: 'Qwen internal error; reference = test' }, { status: 500 });
     const failed = await POST(request({ prompt: 'Create a portrait', model: 'qwen', count: 1 }));
-    assert.equal(failed.status, 501);
+    assert.equal(failed.status, 500);
     assert.doesNotMatch((await failed.json()).error, /Qwen|reference =/);
   } finally {
     globalThis.fetch = originalFetch;

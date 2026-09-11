@@ -28,6 +28,11 @@ function isLocalOrigin(origin: string): boolean {
   return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(origin);
 }
 
+function secret(name: string): string | undefined {
+  const workerEnv = env as unknown as Record<string, string | undefined>;
+  return process.env[name] ?? workerEnv[name];
+}
+
 type GenerateImageBody = {
   prompt?: unknown;
   style?: unknown;
@@ -65,12 +70,12 @@ const KLING_SIZE_MAP: Record<string, string> = {
   '16:9': '1344x768',
 };
 
-const A2E_SIZE_MAP: Record<string, { width: number; height: number }> = {
-  '1:1': { width: 1024, height: 1024 },
-  '4:5': { width: 928, height: 1152 },
-  '3:4': { width: 768, height: 1024 },
-  '9:16': { width: 768, height: 1344 },
-  '16:9': { width: 1344, height: 768 },
+const A2E_QWEN_SIZE_MAP: Record<string, string> = {
+  '1:1': '1024*1024',
+  '4:5': '928*1152',
+  '3:4': '768*1024',
+  '9:16': '768*1344',
+  '16:9': '1344*768',
 };
 
 const HIGGSFIELD_SUBMIT_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard';
@@ -102,7 +107,7 @@ function json(body: Record<string, unknown>, status = 200) {
 // subrequests, shared across the whole batch). So POST only submits and hands back a
 // jobId; the browser polls GET, and each poll is a fresh invocation with its own budget.
 
-type JobTask = { kind: 'higgsfield' | 'qwen' | 'kling' | 'a2e-text' | 'a2e-nano'; ref: string; url?: string; error?: string };
+type JobTask = { kind: 'higgsfield' | 'qwen' | 'kling' | 'a2e-qwen'; ref: string; url?: string; error?: string };
 type Job = { tasks: JobTask[] };
 
 type JobKV = KVNamespaceLike & {
@@ -208,7 +213,7 @@ function extractA2EUrls(payload: A2ETaskResponse | null): string[] {
   return urls;
 }
 
-async function submitA2E(apiToken: string, kind: 'a2e-text' | 'a2e-nano', endpoint: string, payload: Record<string, unknown>): Promise<JobTask> {
+async function submitA2E(apiToken: string, kind: 'a2e-qwen', endpoint: string, payload: Record<string, unknown>): Promise<JobTask> {
   const response = await fetch(`${A2E_API_BASE}${endpoint}`, {
     method: 'POST',
     signal: AbortSignal.timeout(35000),
@@ -271,7 +276,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
   if (task.url || task.error) return task;
   try {
     if (task.kind === 'higgsfield') {
-      const apiKey = process.env.HIGGSFIELD_API_KEY;
+      const apiKey = secret('HIGGSFIELD_API_KEY');
       const response = await fetch(task.ref, { headers: { Authorization: `Key ${apiKey}` } });
       const data = (await response.json().catch(() => null)) as HiggsfieldStatusResponse | null;
       if (!response.ok) return { ...task, error: describeProviderError(data?.error, `Higgsfield respondió ${response.status}.`) };
@@ -283,7 +288,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       return task;
     }
     if (task.kind === 'qwen') {
-      const apiKey = process.env.QWEN_API_KEY;
+      const apiKey = secret('QWEN_API_KEY');
       const response = await fetch(`${QWEN_TASK_URL}/${task.ref}`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(25000) });
       const data = (await response.json().catch(() => null)) as QwenTaskResponse | null;
       if (!response.ok) return { ...task, error: describeProviderError(data?.message, `Qwen respondió ${response.status}.`) };
@@ -295,10 +300,10 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       if (!['PENDING', 'RUNNING'].includes(data?.output?.task_status ?? '')) return { ...task, error: 'No se recibió un estado válido de la generación.' };
       return task;
     }
-    if (task.kind === 'a2e-text' || task.kind === 'a2e-nano') {
-      const apiToken = process.env.A2E_API_TOKEN;
-      const endpoint = task.kind === 'a2e-text' ? `/api/v1/userText2image/${task.ref}` : `/api/v1/userNanoBanana/detail/${task.ref}`;
-      const response = await fetch(`${A2E_API_BASE}${endpoint}`, { headers: { Authorization: `Bearer ${apiToken}` }, signal: AbortSignal.timeout(25000) });
+    if (task.kind === 'a2e-qwen') {
+      const apiToken = secret('A2E_API_TOKEN');
+      if (!apiToken) return { ...task, error: 'La generación de contenido no está configurada. Contacta al administrador.' };
+      const response = await fetch(`${A2E_API_BASE}/api/v1/userQwen2Image/detail/${task.ref}`, { headers: { Authorization: `Bearer ${apiToken}` }, signal: AbortSignal.timeout(25000) });
       const data = (await response.json().catch(() => null)) as A2ETaskResponse | null;
       if (!response.ok) return { ...task, error: describeProviderError(data?.message ?? data?.error, `El servicio respondió ${response.status}.`) };
       const status = data?.data?.current_status ?? data?.current_status ?? data?.status;
@@ -310,7 +315,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       if (!['PENDING', 'RUNNING', 'PROCESSING', 'QUEUED', 'sent', 'pending'].includes(status ?? '')) return { ...task, error: 'No se recibió un estado válido de la generación.' };
       return task;
     }
-    const apiKey = process.env.KLING_API_KEY;
+    const apiKey = secret('KLING_API_KEY');
     const response = await fetch(`${KLING_API_URL}?task_id=${task.ref}`, { headers: { Authorization: `Bearer ${apiKey}` } });
     const data = (await response.json().catch(() => null)) as KlingTaskResponse | null;
     if (!response.ok) return { ...task, error: describeProviderError(data?.message, `Kling respondió ${response.status}.`) };
@@ -465,7 +470,7 @@ export async function POST(request: Request) {
   try {
     if (body?.soulId) {
       if (model !== 'higgsfield' || typeof body.soulId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(body.soulId)) return json({ error: 'Los avatares con identidad Soul solo se pueden generar con Higgsfield.' }, 400);
-      const apiKey = process.env.HIGGSFIELD_API_KEY;
+      const apiKey = secret('HIGGSFIELD_API_KEY');
       if (!apiKey) return json({ error: 'Soul no está configurado.' }, 501);
       const authHeader = `Key ${apiKey}`;
       const tasks: JobTask[] = [];
@@ -478,41 +483,22 @@ export async function POST(request: Request) {
       return json({ jobId: await createJob(tasks) });
     }
     if (model === 'qwen') {
-      const a2eToken = process.env.A2E_API_TOKEN;
-      if (a2eToken && (!referenceImage || !isLocalOrigin(new URL(request.url).origin))) {
-        try {
-          const { width, height } = A2E_SIZE_MAP[aspectRatio] ?? A2E_SIZE_MAP['1:1'];
-          const fullPrompt = buildPrompt(prompt);
-          const a2eReferenceImage = referenceImage ? await publishReferenceImage(referenceImage, new URL(request.url).origin) : null;
-          const tasks = await submitAll(count, () => {
-            if (a2eReferenceImage) {
-              return submitA2E(a2eToken, 'a2e-nano', '/api/v1/userNanoBanana/start', {
-                name: 'Creators Academy',
-                prompt: fullPrompt,
-                input_images: [a2eReferenceImage],
-              });
-            }
-            return submitA2E(a2eToken, 'a2e-text', '/api/v1/userText2image/start', {
-              name: 'Creators Academy',
-              prompt: fullPrompt,
-              req_key: 'high_aes_general_v21_L',
-              width,
-              height,
-            });
-          });
-          return json({ jobId: await createJob(tasks) });
-        } catch {
-          // If the account token is not enabled for A2E image generation, keep the
-          // user flow alive through the existing image provider.
-        }
+      const a2eToken = secret('A2E_API_TOKEN');
+      if (!a2eToken) return json({ error: 'La generación de contenido no está configurada. Contacta al administrador.' }, 501);
+      if (referenceImage && isLocalOrigin(new URL(request.url).origin)) {
+        return json({ error: 'Para usar una referencia con Contenido, abre la versión desplegada para que A2E pueda leer la imagen.' }, 400);
       }
-
-      const apiKey = process.env.QWEN_API_KEY;
-      if (!apiKey) return json({ error: 'QWEN_API_KEY no está configurada.' }, 501);
       const fullPrompt = buildPrompt(prompt);
-      const size = QWEN_SIZE_MAP[aspectRatio] ?? '1024*1024';
-      const images = await editOneImageQwen(apiKey, referenceImage, fullPrompt, size, count);
-      return json({ images: await retainImages(images, new URL(request.url).origin) });
+      const size = A2E_QWEN_SIZE_MAP[aspectRatio] ?? A2E_QWEN_SIZE_MAP['1:1'];
+      const a2eReferenceImage = referenceImage ? await publishReferenceImage(referenceImage, new URL(request.url).origin) : null;
+      const tasks = await submitAll(count, () => submitA2E(a2eToken, 'a2e-qwen', '/api/v1/userQwen2Image/start', {
+        name: 'imagen-avatar',
+        prompt: fullPrompt,
+        model: 'qwen-image-2.0-pro',
+        input_images: a2eReferenceImage ? [a2eReferenceImage] : [],
+        size,
+      }));
+      return json({ jobId: await createJob(tasks) });
     }
 
     if (referenceImage && model === 'kling') {
@@ -524,7 +510,7 @@ export async function POST(request: Request) {
       if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(requestOrigin)) {
         return json({ error: 'Higgsfield necesita una URL pública para leer referencias. En local usa Qwen o despliega la app.' }, 400);
       }
-      const apiKey = process.env.HIGGSFIELD_API_KEY;
+      const apiKey = secret('HIGGSFIELD_API_KEY');
       if (!apiKey) {
         return json({ error: 'HIGGSFIELD_API_KEY no está configurada.' }, 501);
       }
@@ -537,7 +523,7 @@ export async function POST(request: Request) {
     }
 
     if (model === 'kling') {
-      const apiKey = process.env.KLING_API_KEY;
+      const apiKey = secret('KLING_API_KEY');
       if (!apiKey) return json({ error: 'KLING_API_KEY no está configurada.' }, 501);
       const size = KLING_SIZE_MAP[aspectRatio] ?? '1024x1024';
       const fullPrompt = buildPrompt(prompt);
@@ -546,7 +532,7 @@ export async function POST(request: Request) {
     }
 
     // Default: Higgsfield
-    const apiKey = process.env.HIGGSFIELD_API_KEY;
+    const apiKey = secret('HIGGSFIELD_API_KEY');
     if (!apiKey) {
       return json({ error: 'HIGGSFIELD_API_KEY no está configurada.' }, 501);
     }
