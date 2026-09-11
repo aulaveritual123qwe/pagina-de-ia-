@@ -51,7 +51,7 @@ test('image generation uses A2E jobs and hides service errors', async () => {
 
     globalThis.fetch = async () => Response.json({ message: 'Qwen internal error; reference = test' }, { status: 500 });
     const failed = await POST(request({ prompt: 'Create a portrait', model: 'qwen', count: 1 }));
-    assert.equal(failed.status, 500);
+    assert.equal(failed.status, 501);
     assert.doesNotMatch((await failed.json()).error, /Qwen|reference =/);
   } finally {
     globalThis.fetch = originalFetch;

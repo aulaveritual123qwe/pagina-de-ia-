@@ -380,7 +380,7 @@ export default function HomePage() {
         aspectRatio: ratio,
         quality,
         count: amount,
-        model: avatar?.soulId ? 'higgsfield' : 'qwen',
+        model: 'higgsfield',
         referenceImage: avatar?.soulId ? undefined : avatar?.referenceImage ?? referenceImage?.dataUrl,
         soulId: avatar?.soulId,
       });
@@ -608,8 +608,8 @@ export default function HomePage() {
               onCreateCharacter={() => setShowOnboarding(true)}
             />
           )}
-          <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} /></div>
-          <div hidden={view !== 'especial' || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} /></div>
+          <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="kling" /></div>
+          <div hidden={view !== 'especial' || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="a2e" /></div>
           {view === 'plantillas' && <TemplatesView onUseTemplate={useTemplate} />}
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
           {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 700); notify('Se añadieron 700 créditos (recarga de US$9.90).'); }} />}
@@ -1558,12 +1558,17 @@ const VIDEO_CREDIT_COST_BY_DURATION: Record<string, number> = {
   '12 segundos': 288,
 };
 
+const VIDEO_DURATION_OPTIONS_BY_PROVIDER: Record<'kling' | 'a2e', string[]> = {
+  kling: ['5 segundos', '10 segundos', '12 segundos'],
+  a2e: ['5 segundos', '10 segundos'],
+};
+
 const VIDEO_POLL_INTERVAL_MS = 5000;
 const VIDEO_MAX_POLL_ATTEMPTS = 60; // up to ~5 minutes
 
 const VIDEO_MODE_OPTIONS = ['Texto a video', 'Imagen a video'];
 
-function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean; onNotify: (message: string) => void; hideHeading?: boolean }) {
+function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false, provider = 'kling' }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean; onNotify: (message: string) => void; hideHeading?: boolean; provider?: 'kling' | 'a2e' }) {
   const [studioMode, setStudioMode] = useState('Generar video');
   const [videoMode, setVideoMode] = useState(VIDEO_MODE_OPTIONS[0]);
   const [videoPrompt, setVideoPrompt] = useState('Lua caminando por una cafetería creativa, movimiento de cámara suave y luz cinematográfica.');
@@ -1579,8 +1584,12 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
   const busyRef = useRef(false);
   const cancelRef = useRef(false);
   const isImageMode = videoMode === 'Imagen a video';
+  const durationOptions = VIDEO_DURATION_OPTIONS_BY_PROVIDER[provider];
 
   useEffect(() => { cancelRef.current = false; return () => { cancelRef.current = true; }; }, []);
+  useEffect(() => {
+    if (!durationOptions.includes(duration)) setDuration(durationOptions[0]);
+  }, [duration, durationOptions]);
 
   async function pollVideoTask(taskId: string): Promise<string> {
     for (let attempt = 0; attempt < VIDEO_MAX_POLL_ATTEMPTS; attempt += 1) {
@@ -1624,6 +1633,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
           aspectRatio: ratio,
           duration: Number.parseInt(duration, 10),
           mode: isImageMode ? 'image' : 'text',
+          provider,
           referenceImage: isImageMode ? refImage?.dataUrl : undefined,
         }),
       });
@@ -1710,7 +1720,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false }: {
           </label>
           <div className="video-prompt-help" id="video-prompt-help"><span>Incluye el lugar, la luz y la acción.</span><span>{videoPrompt.length}/2000</span></div>
           <div className="settings-grid">
-            <SelectField label="Duración · máximo 12 segundos" value={duration} onChange={setDuration} options={['5 segundos', '10 segundos', '12 segundos']} />
+            <SelectField label={`Duración · máximo ${provider === 'a2e' ? '10' : '12'} segundos`} value={duration} onChange={setDuration} options={durationOptions} />
             {isImageMode ? <p>Formato del video: se conserva el formato de la imagen de referencia.</p> : <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} />}
           </div>
           </fieldset>

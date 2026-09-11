@@ -480,26 +480,31 @@ export async function POST(request: Request) {
     if (model === 'qwen') {
       const a2eToken = process.env.A2E_API_TOKEN;
       if (a2eToken && (!referenceImage || !isLocalOrigin(new URL(request.url).origin))) {
-        const { width, height } = A2E_SIZE_MAP[aspectRatio] ?? A2E_SIZE_MAP['1:1'];
-        const fullPrompt = buildPrompt(prompt);
-        const a2eReferenceImage = referenceImage ? await publishReferenceImage(referenceImage, new URL(request.url).origin) : null;
-        const tasks = await submitAll(count, () => {
-          if (a2eReferenceImage) {
-            return submitA2E(a2eToken, 'a2e-nano', '/api/v1/userNanoBanana/start', {
+        try {
+          const { width, height } = A2E_SIZE_MAP[aspectRatio] ?? A2E_SIZE_MAP['1:1'];
+          const fullPrompt = buildPrompt(prompt);
+          const a2eReferenceImage = referenceImage ? await publishReferenceImage(referenceImage, new URL(request.url).origin) : null;
+          const tasks = await submitAll(count, () => {
+            if (a2eReferenceImage) {
+              return submitA2E(a2eToken, 'a2e-nano', '/api/v1/userNanoBanana/start', {
+                name: 'Creators Academy',
+                prompt: fullPrompt,
+                input_images: [a2eReferenceImage],
+              });
+            }
+            return submitA2E(a2eToken, 'a2e-text', '/api/v1/userText2image/start', {
               name: 'Creators Academy',
               prompt: fullPrompt,
-              input_images: [a2eReferenceImage],
+              req_key: 'high_aes_general_v21_L',
+              width,
+              height,
             });
-          }
-          return submitA2E(a2eToken, 'a2e-text', '/api/v1/userText2image/start', {
-            name: 'Creators Academy',
-            prompt: fullPrompt,
-            req_key: 'high_aes_general_v21_L',
-            width,
-            height,
           });
-        });
-        return json({ jobId: await createJob(tasks) });
+          return json({ jobId: await createJob(tasks) });
+        } catch {
+          // If the account token is not enabled for A2E image generation, keep the
+          // user flow alive through the existing image provider.
+        }
       }
 
       const apiKey = process.env.QWEN_API_KEY;

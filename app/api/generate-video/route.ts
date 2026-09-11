@@ -10,6 +10,7 @@ const WAN_SUBMIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc
 const WAN_TASK_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/tasks';
 const WAN_I2V_MODEL = 'wan2.7-i2v-2026-04-25';
 const A2E_API_BASE = 'https://video.a2e.ai';
+const KLING_API_BASE = 'https://api.klingai.com/v1/videos';
 
 // Wan2.7 accepts ratio directly; map the UI's aspect ratio options to supported values.
 const WAN_RATIO_MAP: Record<string, string> = {
@@ -61,6 +62,7 @@ type SubmitBody = {
   model?: unknown;
   mode?: unknown;
   referenceImage?: unknown;
+  provider?: unknown;
 };
 
 type WanSubmitResponse = {
@@ -90,8 +92,39 @@ type A2EVideoTaskResponse = {
   error?: string;
 };
 
+type KlingSubmitResponse = {
+  code?: number;
+  message?: string;
+  data?: { task_id?: string };
+};
+
+type KlingTaskResponse = {
+  code?: number;
+  message?: string;
+  data?: {
+    task_status?: string;
+    task_status_msg?: string;
+    task_result?: { videos?: Array<{ url?: string }> };
+  };
+};
+
 function extractA2ETaskId(payload: A2EStartResponse | null): string | null {
   return payload?.data?._id ?? payload?.data?.task_id ?? payload?.data?.taskId ?? payload?.task_id ?? payload?.taskId ?? null;
+}
+
+async function klingAuthorization() {
+  const access = process.env.KLING_ACCESS_KEY;
+  const secret = process.env.KLING_SECRET_KEY;
+  if (!access || !secret) {
+    if (process.env.KLING_API_KEY) return `Bearer ${process.env.KLING_API_KEY}`;
+    throw new Error('La generación de video no está configurada. Contacta al administrador.');
+  }
+  const encode = (value: string) => btoa(value).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const now = Math.floor(Date.now() / 1000);
+  const unsigned = `${encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${encode(JSON.stringify({ iss: access, exp: now + 1800, nbf: now - 5 }))}`;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(unsigned)));
+  return `Bearer ${unsigned}.${encode(String.fromCharCode(...signature))}`;
 }
 
 export async function POST(request: Request) {
@@ -103,8 +136,10 @@ export async function POST(request: Request) {
 
   const rawDuration = typeof body?.duration === 'number' ? body.duration : Number(body?.duration);
   const duration = body?.duration === undefined ? 5 : rawDuration;
-  if (![5, 10, 12].includes(duration)) {
-    return json({ error: 'Elige una duración de 5, 10 o 12 segundos. El máximo es 12 segundos.' }, 400);
+  const provider = body?.provider === 'a2e' ? 'a2e' : 'kling';
+  const allowedDurations = provider === 'a2e' ? [5, 10] : [5, 10, 12];
+  if (!allowedDurations.includes(duration)) {
+    return json({ error: provider === 'a2e' ? 'Elige una duración de 5 o 10 segundos.' : 'Elige una duración de 5, 10 o 12 segundos. El máximo es 12 segundos.' }, 400);
   }
 
   const isImageToVideo = body?.mode === 'image' || body?.model === 'wan-i2v';
@@ -112,9 +147,15 @@ export async function POST(request: Request) {
   if (isImageToVideo && !referenceImage) {
     return json({ error: 'Sube una imagen para animarla.' }, 400);
   }
+  const ratio = body?.aspectRatio === undefined ? '9:16' : WAN_RATIO_MAP[body.aspectRatio as string];
+  if (!isImageToVideo && !ratio) {
+    return json({ error: 'Elige un formato válido.' }, 400);
+  }
 
   const a2eToken = process.env.A2E_API_TOKEN;
-  if (isImageToVideo && a2eToken) {
+  if (provider === 'a2e') {
+    if (!isImageToVideo) return json({ error: 'Contenido especial genera video desde una imagen de referencia.' }, 400);
+    if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     try {
       const imageUrl = await publishReferenceImage(referenceImage as string, new URL(request.url).origin);
       const submitResponse = await fetch(`${A2E_API_BASE}/api/v1/userImage2Video/start`, {
@@ -140,14 +181,34 @@ export async function POST(request: Request) {
     }
   }
 
+  try {
+    if (!process.env.KLING_API_KEY && (!process.env.KLING_ACCESS_KEY || !process.env.KLING_SECRET_KEY)) {
+      return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
+    }
+    const auth = await klingAuthorization();
+    const origin = new URL(request.url).origin;
+    const imageUrl = isImageToVideo ? await publishReferenceImage(referenceImage as string, origin) : undefined;
+    const submitResponse = await fetch(`${KLING_API_BASE}/${isImageToVideo ? 'image2video' : 'text2video'}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(35000),
+      headers: { 'Content-Type': 'application/json', Authorization: auth },
+      body: JSON.stringify(isImageToVideo
+        ? { model_name: 'kling-v2-6', image_url: imageUrl, prompt, mode: 'pro', duration: String(duration) }
+        : { model_name: 'kling-v2-6', prompt, aspect_ratio: ratio, mode: 'pro', duration: String(duration) }),
+    });
+    const payload = (await submitResponse.json().catch(() => null)) as KlingSubmitResponse | null;
+    const taskId = payload?.data?.task_id;
+    if (!submitResponse.ok || payload?.code || !taskId) {
+      return json({ error: payload?.message ?? `El proveedor respondió con estado ${submitResponse.status}.` }, 502);
+    }
+    return json({ taskId: `kling:${taskId}` });
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
+  }
+
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
-  }
-
-  const ratio = body?.aspectRatio === undefined ? '9:16' : WAN_RATIO_MAP[body.aspectRatio as string];
-  if (!isImageToVideo && !ratio) {
-    return json({ error: 'Elige un formato válido.' }, 400);
   }
 
   const requestBody = isImageToVideo
@@ -179,9 +240,11 @@ export async function POST(request: Request) {
       return json({ error: payload?.message ?? `El proveedor respondió con estado ${submitResponse.status}.` }, 502);
     }
 
-    return json({ taskId: payload.output.task_id });
-  } catch (error) {
-    return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
+    const taskId = payload?.output?.task_id;
+    if (!taskId) return json({ error: 'El proveedor no devolvió una tarea válida.' }, 502);
+    return json({ taskId });
+  } catch {
+    return json({ error: 'Error contactando al proveedor.' }, 500);
   }
 }
 
@@ -214,6 +277,28 @@ export async function GET(request: Request) {
       if (!['sent', 'pending', 'PENDING', 'RUNNING', 'PROCESSING', 'QUEUED'].includes(status ?? '')) {
         return json({ error: 'El proveedor no devolvió un estado válido. Vuelve a consultar el video.' }, 502);
       }
+      return json({ status: 'RUNNING' });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
+    }
+  }
+
+  if (taskId.startsWith('kling:')) {
+    const externalId = taskId.slice(6);
+    try {
+      const statusResponse = await fetch(`${KLING_API_BASE}/${externalId}`, {
+        headers: { Authorization: await klingAuthorization() },
+        signal: AbortSignal.timeout(25000),
+      });
+      const payload = (await statusResponse.json().catch(() => null)) as KlingTaskResponse | null;
+      if (!statusResponse.ok || payload?.code) return json({ error: payload?.message ?? `No se pudo consultar el estado (${statusResponse.status}).` }, 502);
+      const status = payload?.data?.task_status;
+      if (status === 'succeed' || status === 'SUCCEEDED') {
+        const url = payload?.data?.task_result?.videos?.[0]?.url;
+        if (!url) return json({ error: 'El proveedor completó la tarea sin devolver un video.' }, 502);
+        return json({ status: 'SUCCEEDED', url });
+      }
+      if (status === 'failed' || status === 'FAILED') return json({ status: 'FAILED', error: payload?.data?.task_status_msg ?? 'La generación de video falló.' });
       return json({ status: 'RUNNING' });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : 'Error contactando al proveedor.' }, 500);
