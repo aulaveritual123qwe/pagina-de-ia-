@@ -477,16 +477,17 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (body?.soulId) {
-      if (model !== 'higgsfield' || typeof body.soulId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(body.soulId)) return json({ error: 'Los avatares con identidad Soul solo se pueden generar con Higgsfield.' }, 400);
+    const soulReferenceId = typeof body?.referenceId === 'string' ? body.referenceId : typeof body?.soulId === 'string' ? body.soulId : '';
+    if (soulReferenceId) {
+      if (model !== 'higgsfield' || !/^[a-zA-Z0-9_-]{1,100}$/.test(soulReferenceId)) return json({ error: 'Los avatares con Reference ID de Soul solo se pueden generar con Soul 2.' }, 400);
       const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
       if (!apiKey) return json({ error: 'Soul no está configurado.' }, 501);
       const authHeader = `Key ${apiKey}`;
       const tasks: JobTask[] = [];
       for (let index = 0; index < count; index++) {
-        const response = await fetch('https://api.higgsfield.ai/higgsfield-ai/soul/character', { method: 'POST', headers: { Authorization: authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: buildPrompt(prompt), custom_reference_id: body.soulId, custom_reference_strength: 1, aspect_ratio: HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1', resolution: '1080p' }) });
+        const response = await fetch('https://api.higgsfield.ai/higgsfield-ai/soul/character', { method: 'POST', headers: { Authorization: authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: buildPrompt(prompt), custom_reference_id: soulReferenceId, custom_reference_strength: 1, aspect_ratio: HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1', resolution: '1080p' }) });
         const data = await response.json() as HiggsfieldSubmitResponse;
-        if (!response.ok || !data.status_url) throw new Error(data.error ?? 'No se pudo generar con la identidad de Soul.');
+        if (!response.ok || !data.status_url) throw new Error(data.error ?? 'No se pudo generar con el Reference ID de Soul.');
         tasks.push({ kind: 'higgsfield', ref: data.status_url });
       }
       return json({ jobId: await createJob(tasks) });

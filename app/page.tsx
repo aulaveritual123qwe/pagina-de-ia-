@@ -96,7 +96,7 @@ function charactersKey(email: string) { return `creators-characters:${email}`; }
 function userPlanKey(email: string) { return `creators-plan:${email}`; }
 function planIsPro(plan: string) { return plan !== 'Free'; }
 
-type Character = { id: string; name: string; referenceImage: string; resultImage: string; references?: string[]; soulId?: string; description?: string; gallery?: string[] };
+type Character = { id: string; name: string; referenceImage: string; resultImage: string; references?: string[]; soulId?: string; referenceId?: string; soulStatus?: string; description?: string; gallery?: string[] };
 type UserRecord = { name: string; passwordHash: string };
 
 async function hashPassword(password: string): Promise<string> {
@@ -1361,7 +1361,7 @@ function CreacionesView({ credits, plan, characters, selectedAvatar, onSelectAva
   async function createAvatar() {
     if (creating) return;
     if (selectedSlot === null) { setError('Elige un avatar primero.'); return; }
-    if (references.length < 20) { setError('Sube 20 imágenes del mismo avatar para que Soul pueda mantener la identidad.'); return; }
+    if (references.length !== 20) { setError('Sube exactamente 20 imágenes del mismo avatar para crear su Reference ID.'); return; }
     if (!name.trim()) { setError('Ponle un nombre a tu avatar.'); return; }
     if (credits < IMAGE_CREDIT_COST) { setError('No tienes créditos suficientes para preparar este avatar.'); return; }
     setCreating(true); setError('');
@@ -1374,19 +1374,22 @@ function CreacionesView({ credits, plan, characters, selectedAvatar, onSelectAva
         urls.push(uploaded.url);
       }
       const create = await fetch('/api/soul-character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), references: urls }) });
-      const created = await create.json() as { id?: string; status?: string; error?: string };
-      if (!create.ok || !created.id) throw new Error(created.error ?? 'Soul no pudo crear el avatar.');
-      let ready = created.status === 'completed';
+      const created = await create.json() as { id?: string; soulId?: string; referenceId?: string; status?: string; error?: string };
+      const referenceId = created.referenceId ?? created.soulId ?? created.id;
+      if (!create.ok || !referenceId) throw new Error(created.error ?? 'Soul no pudo crear el Reference ID.');
+      let finalStatus = created.status ?? 'PENDING';
+      let ready = finalStatus.toLowerCase() === 'completed';
       for (let attempt = 0; attempt < 80 && !ready; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 3000));
-        const response = await fetch(`/api/soul-character?id=${encodeURIComponent(created.id)}`);
+        const response = await fetch(`/api/soul-character?id=${encodeURIComponent(referenceId)}`);
         const data = await response.json() as { status?: string; error?: string };
-        if (!response.ok || data.status === 'failed') throw new Error(data.error ?? 'Soul no pudo preparar el avatar.');
-        ready = data.status === 'completed';
+        finalStatus = data.status ?? finalStatus;
+        if (!response.ok || finalStatus.toLowerCase() === 'failed') throw new Error(data.error ?? 'Soul no pudo preparar el avatar.');
+        ready = finalStatus.toLowerCase() === 'completed';
       }
       if (!ready) throw new Error('Soul sigue preparando el avatar. Inténtalo otra vez en unos minutos sin cambiar las fotos.');
-      const character: Character = { id: activeCharacter?.id ?? crypto.randomUUID(), name: name.trim(), description, referenceImage: urls[0], resultImage: primaryPreview, references: urls, soulId: created.id, gallery: activeCharacter?.gallery ?? [] };
-      setSaved(character); onCreated(character); onSelectAvatar(character.name); onNotify(`Avatar "${character.name}" guardado con Soul.`); setSelectedSlot(null);
+      const character: Character = { id: activeCharacter?.id ?? crypto.randomUUID(), name: name.trim(), description, referenceImage: urls[0], resultImage: primaryPreview, references: urls, soulId: referenceId, referenceId, soulStatus: 'COMPLETED', gallery: activeCharacter?.gallery ?? [] };
+      setSaved(character); onCreated(character); onSelectAvatar(character.name); onNotify(`Avatar "${character.name}" listo. Reference ID: ${referenceId}. Estado: COMPLETED.`); setSelectedSlot(null);
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el avatar. Inténtalo nuevamente.'); }
     finally { setCreating(false); }
   }
@@ -1464,9 +1467,10 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
         }
         setSavedReferences(urls);
         const create = await fetch('/api/soul-character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, references: urls }) });
-        const created = await create.json() as { id?: string; error?: string };
-        if (!create.ok || !created.id) throw new Error(created.error ?? 'No se pudo crear la identidad.');
-        identity = created.id;
+        const created = await create.json() as { id?: string; soulId?: string; referenceId?: string; status?: string; error?: string };
+        const createdReferenceId = created.referenceId ?? created.soulId ?? created.id;
+        if (!create.ok || !createdReferenceId) throw new Error(created.error ?? 'No se pudo crear el Reference ID.');
+        identity = createdReferenceId;
         setSoulId(identity);
       }
       let ready = false;
@@ -1474,29 +1478,22 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
         const response = await fetch(`/api/soul-character?id=${encodeURIComponent(identity)}`);
         const data = await response.json() as { status?: string; error?: string };
         if (!response.ok || data.status === 'failed') throw new Error(data.error ?? 'No se pudo preparar el avatar.');
-        if (data.status === 'completed') { ready = true; break; }
+        if ((data.status ?? '').toLowerCase() === 'completed') { ready = true; break; }
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
       if (!ready) throw new Error('Seguimos preparando tu avatar. Pulsa Reintentar para consultar la misma identidad.');
-      const response = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `${description}. ${prompt}`,
-          style: 'Realista',
-          aspectRatio: avatarRatio,
-          quality: 'Alta',
-          count: 1,
-          model: 'higgsfield',
-          soulId: identity,
-        }),
+      const generated = await generateImages({
+        prompt: `${description}. ${prompt}`,
+        style: 'Realista',
+        aspectRatio: avatarRatio,
+        quality: 'Alta',
+        count: 1,
+        model: 'higgsfield',
+        soulId: identity,
+        referenceId: identity,
       });
-      const data = (await response.json().catch(() => null)) as { images?: string[]; error?: string } | null;
-      if (!response.ok || !data?.images?.length) {
-        throw new Error(data?.error ?? 'No se pudo crear tu personaje. Inténtalo de nuevo.');
-      }
       onSpendCredits(cost, '');
-      setResultImage(data.images[0]);
+      setResultImage(generated.images[0]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear tu personaje. Inténtalo de nuevo.');
     } finally {
@@ -1506,7 +1503,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
 
   function handleSave() {
     if (!reference || !resultImage) return;
-    onCreated({ id: crypto.randomUUID(), name: name.trim() || 'Mi personaje', referenceImage: savedReferences[0], resultImage, soulId, description, references: savedReferences });
+    onCreated({ id: crypto.randomUUID(), name: name.trim() || 'Mi personaje', referenceImage: savedReferences[0], resultImage, soulId, referenceId: soulId, soulStatus: 'COMPLETED', description, references: savedReferences });
   }
 
   return (

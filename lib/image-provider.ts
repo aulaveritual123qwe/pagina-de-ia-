@@ -7,6 +7,7 @@ export type ImageRequest = {
   model?: string;
   referenceImage?: string;
   soulId?: string;
+  referenceId?: string;
 };
 
 export type ImageGenerationResult = {
