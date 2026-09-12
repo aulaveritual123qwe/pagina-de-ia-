@@ -120,7 +120,7 @@ export default function AdminPage() {
           <h2 className="text-xl font-semibold mb-4">📊 Estado de Servicios</h2>
           <div className="grid grid-cols-3 gap-4">
             <div className={`p-4 rounded-lg ${config?.configured.soul ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
-              <div className="text-sm text-gray-400">Soul (Higgsfield)</div>
+              <div className="text-sm text-gray-400">Avatares e imágenes</div>
               <div className="text-lg font-bold">{config?.configured.soul ? '✅ Activo' : '❌ Inactivo'}</div>
               {config?.masked.HIGGSFIELD_API_KEY && (
                 <div className="text-xs text-gray-500 mt-1">{config.masked.HIGGSFIELD_API_KEY}</div>
@@ -167,7 +167,7 @@ export default function AdminPage() {
 
           <div className="space-y-3">
             {[
-              { key: 'HIGGSFIELD_API_KEY', label: '🎨 Soul / Higgsfield API Key' },
+              { key: 'HIGGSFIELD_API_KEY', label: '🎨 API Key de imágenes y avatares' },
               { key: 'KLING_API_KEY', label: '🎬 Kling API Key' },
               { key: 'KLING_ACCESS_KEY', label: '🎬 Kling Access Key' },
               { key: 'KLING_SECRET_KEY', label: '🔑 Kling Secret Key' },

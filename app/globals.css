@@ -1784,3 +1784,19 @@ body:has(.special-theme) [data-slot="select-item"][data-highlighted] { backgroun
 .api-status-row span.ready { background: #e7f8ef; color: #11834c; }
 .api-two-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 @media (max-width: 640px) { .api-two-cols { grid-template-columns: 1fr; } }
+
+.avatar-dropdown { display: flex; flex-direction: column; gap: 10px; }
+.avatar-dropdown-trigger { width: 100%; }
+.avatar-dropdown-trigger > svg { justify-self: end; color: #8a6cff; }
+.avatar-dropdown-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e6ddff;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgb(39 24 86 / 12%);
+}
+.avatar-selector.is-locked { opacity: 0.72; }
+.special-theme .avatar-dropdown-menu { background: #0f1827; border-color: #28364a; box-shadow: none; }

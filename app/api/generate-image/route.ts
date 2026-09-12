@@ -142,7 +142,7 @@ async function submitHiggsfield(endpoint: string, authHeader: string, payload: R
   });
   const data = (await response.json().catch(() => null)) as HiggsfieldSubmitResponse | null;
   if (!response.ok || !data?.status_url) {
-    throw new Error(describeProviderError(data?.error, `Higgsfield respondió con estado ${response.status}.`));
+    throw new Error(describeProviderError(data?.error, `El servicio de imagen respondió con estado ${response.status}.`));
   }
   return { kind: 'higgsfield', ref: data.status_url };
 }
@@ -288,12 +288,12 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
       const response = await fetch(task.ref, { headers: { Authorization: `Key ${apiKey}` } });
       const data = (await response.json().catch(() => null)) as HiggsfieldStatusResponse | null;
-      if (!response.ok) return { ...task, error: describeProviderError(data?.error, `Higgsfield respondió ${response.status}.`) };
+      if (!response.ok) return { ...task, error: describeProviderError(data?.error, `El servicio de imagen respondió ${response.status}.`) };
       if (data?.status === 'completed') {
         const url = data.images?.[0]?.url;
-        return url ? { ...task, url } : { ...task, error: 'Higgsfield completó sin devolver imagen.' };
+        return url ? { ...task, url } : { ...task, error: 'El servicio de imagen completó sin devolver imagen.' };
       }
-      if (data?.status === 'failed') return { ...task, error: describeProviderError(data.error, 'Higgsfield falló al generar la imagen.') };
+      if (data?.status === 'failed') return { ...task, error: describeProviderError(data.error, 'El servicio de imagen falló al generar la imagen.') };
       return task;
     }
     if (task.kind === 'qwen') {
@@ -479,15 +479,15 @@ export async function POST(request: Request) {
   try {
     const soulReferenceId = typeof body?.referenceId === 'string' ? body.referenceId : typeof body?.soulId === 'string' ? body.soulId : '';
     if (soulReferenceId) {
-      if (model !== 'higgsfield' || !/^[a-zA-Z0-9_-]{1,100}$/.test(soulReferenceId)) return json({ error: 'Los avatares con Reference ID de Soul solo se pueden generar con Soul 2.' }, 400);
+      if (model !== 'higgsfield' || !/^[a-zA-Z0-9_-]{1,100}$/.test(soulReferenceId)) return json({ error: 'Los avatares con identidad guardada solo se pueden generar con el modelo de avatares.' }, 400);
       const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
-      if (!apiKey) return json({ error: 'Soul no está configurado.' }, 501);
+      if (!apiKey) return json({ error: 'El servicio de imagen no está configurado.' }, 501);
       const authHeader = `Key ${apiKey}`;
       const tasks: JobTask[] = [];
       for (let index = 0; index < count; index++) {
         const response = await fetch('https://api.higgsfield.ai/higgsfield-ai/soul/character', { method: 'POST', headers: { Authorization: authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: buildPrompt(prompt), custom_reference_id: soulReferenceId, custom_reference_strength: 1, aspect_ratio: HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1', resolution: '1080p' }) });
         const data = await response.json() as HiggsfieldSubmitResponse;
-        if (!response.ok || !data.status_url) throw new Error(data.error ?? 'No se pudo generar con el Reference ID de Soul.');
+        if (!response.ok || !data.status_url) throw new Error(data.error ?? 'No se pudo generar con la identidad del avatar.');
         tasks.push({ kind: 'higgsfield', ref: data.status_url });
       }
       return json({ jobId: await createJob(tasks) });
@@ -518,11 +518,11 @@ export async function POST(request: Request) {
     if (referenceImage && model === 'higgsfield') {
       const requestOrigin = new URL(request.url).origin;
       if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(requestOrigin)) {
-        return json({ error: 'Higgsfield necesita una URL pública para leer referencias. En local usa Qwen o despliega la app.' }, 400);
+        return json({ error: 'El servicio de imagen necesita una URL pública para leer referencias. En local usa otro modelo o despliega la app.' }, 400);
       }
       const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
       if (!apiKey) {
-        return json({ error: 'HIGGSFIELD_API_KEY no está configurada.' }, 501);
+        return json({ error: 'El servicio de imagen no está configurado.' }, 501);
       }
       const authHeader = `Key ${apiKey}`;
       const higgsfieldRatio = HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1';
@@ -544,7 +544,7 @@ export async function POST(request: Request) {
     // Default: Higgsfield
     const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
     if (!apiKey) {
-      return json({ error: 'HIGGSFIELD_API_KEY no está configurada.' }, 501);
+      return json({ error: 'El servicio de imagen no está configurado.' }, 501);
     }
     const higgsfieldRatio = HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1';
     const authHeader = `Key ${apiKey}`;

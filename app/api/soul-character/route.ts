@@ -12,7 +12,7 @@ async function providerSecret(name: string): Promise<string | undefined> {
 }
 async function headers() {
   const key = await providerSecret('HIGGSFIELD_API_KEY');
-  if (!key) throw new Error('Higgsfield Soul no está configurado.');
+  if (!key) throw new Error('El servicio de avatar no está configurado.');
   return { Authorization: `Key ${key}`, 'Content-Type': 'application/json' };
 }
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       return json({ error: 'Indica un nombre y exactamente 20 referencias subidas del mismo avatar.' }, 400);
     }
     if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(origin)) {
-      return json({ error: 'Para crear avatares con Soul, abre la versión publicada. Soul necesita leer tus referencias desde una URL pública, no desde localhost.' }, 400);
+      return json({ error: 'Para crear avatares, abre la versión publicada. La plataforma necesita leer tus referencias desde una URL pública, no desde localhost.' }, 400);
     }
     const response = await fetch(`${BASE}/v1/custom-references`, { method: 'POST', headers: await headers(), body: JSON.stringify({ name: body.name.trim(), input_images: body.references.map((url: string) => ({ type: 'image_url', image_url: url })) }) });
     const data = await response.json() as { id?: string; reference_id?: string; referenceId?: string; status?: string; detail?: string; message?: string; error?: string };
@@ -32,12 +32,12 @@ export async function POST(request: Request) {
     const referenceId = data.id ?? data.reference_id ?? data.referenceId;
     if (!response.ok || !referenceId) {
       if (response.status === 403 && upstreamMessage.includes('not enough credits')) {
-        return json({ error: 'La cuenta API de Soul/Higgsfield no tiene créditos suficientes. Recarga créditos en Higgsfield para poder crear el avatar.' }, 402);
+        return json({ error: 'El servicio de avatar no pudo guardar la identidad en este momento. Contacta al administrador.' }, 402);
       }
-      return json({ error: 'Soul no pudo registrar el avatar. Revisa el acceso a Soul ID de tu cuenta.' }, 502);
+      return json({ error: 'No se pudo guardar la identidad del avatar. Revisa la configuración del administrador.' }, 502);
     }
     return json({ id: referenceId, soulId: referenceId, referenceId, status: data.status });
-  } catch { return json({ error: 'No se pudo conectar con Soul. Inténtalo nuevamente.' }, 502); }
+  } catch { return json({ error: 'No se pudo conectar con el servicio de avatar. Inténtalo nuevamente.' }, 502); }
 }
 export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get('id');
@@ -47,6 +47,6 @@ export async function GET(request: Request) {
     const data = await response.json() as { id?: string; reference_id?: string; referenceId?: string; status?: string };
     if (!response.ok) return json({ error: 'No se pudo consultar el avatar. Vuelve a consultar sin crear otro.' }, 502);
     { const referenceId = data.id ?? data.reference_id ?? data.referenceId ?? id; return json({ id: referenceId, soulId: referenceId, referenceId, status: data.status }); }
-  } catch { return json({ error: 'No se pudo consultar Soul.' }, 502); }
+  } catch { return json({ error: 'No se pudo consultar la identidad del avatar.' }, 502); }
 }
 
