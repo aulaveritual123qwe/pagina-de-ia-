@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   Coins,
+  Crown,
   Download,
   Eye,
   EyeOff,
@@ -46,7 +47,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { generateImages } from '@/lib/image-provider';
 
-type View = 'inicio' | 'creaciones' | 'avatares' | 'crear' | 'video' | 'especial' | 'biblioteca' | 'planes' | 'ajustes';
+type View = 'inicio' | 'creaciones' | 'crear' | 'video' | 'especial' | 'biblioteca' | 'planes' | 'ajustes';
 
 type ModelContext = {
   registerTool: (
@@ -79,7 +80,6 @@ const media = [
 const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: 'inicio', label: 'Inicio', icon: Home },
   { id: 'creaciones', label: 'Creaciones', icon: FolderHeart },
-  { id: 'avatares', label: 'Mis Avatares', icon: Users },
   { id: 'crear', label: 'Crear Imagen', icon: WandSparkles },
   { id: 'video', label: 'Generar Video', icon: Video },
   { id: 'especial', label: 'Contenido', icon: Sparkles },
@@ -183,10 +183,8 @@ export default function HomePage() {
   useEffect(() => {
     (async () => {
       const users = loadUsers();
-      if (!users[ACCOUNT_EMAIL]) {
-        users[ACCOUNT_EMAIL] = { name: 'Admin', passwordHash: await hashPassword(ACCOUNT_PASSWORD) };
-        saveUsers(users);
-      }
+      users[ACCOUNT_EMAIL] = { name: 'Admin', passwordHash: await hashPassword(ACCOUNT_PASSWORD) };
+      saveUsers(users);
 
       const savedEmail = window.localStorage.getItem(SESSION_KEY) ?? '';
       setAccountEmail(savedEmail);
@@ -231,14 +229,17 @@ export default function HomePage() {
 
   function saveCharacter(character: Character) {
     setCharacters((current) => {
-      const next = [...current, character];
+      const existingIndex = current.findIndex((item) => item.id === character.id || item.name === character.name);
+      const next = existingIndex >= 0
+        ? current.map((item, index) => (index === existingIndex ? character : item))
+        : [...current, character];
       window.localStorage.setItem(charactersKey(accountEmail), JSON.stringify(next));
       return next;
     });
     window.localStorage.setItem(onboardedKey(accountEmail), 'true');
     setShowOnboarding(false);
     setSelectedAvatar(character.name);
-    notify(`Personaje "${character.name}" creado correctamente.`);
+    notify(`Personaje "${character.name}" guardado correctamente.`);
   }
 
   function handleLogout() {
@@ -379,7 +380,7 @@ export default function HomePage() {
     const amount = Number(imageCount);
     if (credits < amount * IMAGE_CREDIT_COST) { notify('No tienes créditos suficientes.'); return; }
     const avatar = characters.find((character) => character.name === selectedAvatar);
-    if (avatar && !avatar.soulId) { notify('Este avatar necesita configurarse con 5 a 10 referencias con sus referencias. Crea su nueva identidad en Mis Avatares.'); return; }
+    if (avatar && !avatar.soulId) { notify('Este avatar necesita configurarse con 20 referencias en Creaciones.'); return; }
     setIsGenerating(true);
     try {
       const { images, source } = await generateImages({
@@ -611,18 +612,7 @@ export default function HomePage() {
             />
           )}
           {view === 'inicio' && <DashboardView onNavigate={navigate} credits={credits} />}
-          {view === 'creaciones' && <CreacionesView credits={credits} characters={characters} selectedAvatar={selectedAvatar} onCreated={saveCharacter} onNotify={notify} />}
-          {view === 'avatares' && (
-            <AvatarsView
-              onNavigate={navigate}
-              plan={plan}
-              onNotify={notify}
-              selectedAvatar={selectedAvatar}
-              onSelectAvatar={setSelectedAvatar}
-              characters={characters}
-              onCreateCharacter={() => setShowOnboarding(true)}
-            />
-          )}
+          {view === 'creaciones' && <CreacionesView credits={credits} plan={plan} characters={characters} selectedAvatar={selectedAvatar} onSelectAvatar={setSelectedAvatar} onCreated={saveCharacter} onNotify={notify} />}
           <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="kling" /></div>
           <div hidden={view !== 'especial' || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="a2e" /></div>
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
@@ -748,9 +738,14 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
 
       const user = users[cleanEmail];
       const passwordHash = await hashPassword(password);
-      if (!user || user.passwordHash !== passwordHash) {
+      const isAdminLogin = cleanEmail === ACCOUNT_EMAIL && password === ACCOUNT_PASSWORD;
+      if (!user || (user.passwordHash !== passwordHash && !isAdminLogin)) {
         setError('Correo o contraseña incorrectos.');
         return;
+      }
+      if (isAdminLogin) {
+        users[ACCOUNT_EMAIL] = { name: 'Admin', passwordHash };
+        saveUsers(users);
       }
       persistRememberedEmail(cleanEmail);
       onLogin(cleanEmail);
@@ -1307,39 +1302,57 @@ function QuickCard({ icon: Icon, title, copy, tone, onClick }: { icon: typeof Ho
   return <button className={`quick-card ${tone}`} type="button" onClick={onClick}><span><Icon size={24} /></span><div><strong>{title}</strong><small>{copy}</small></div><span className="quick-arrow">→</span></button>;
 }
 
-function CreacionesView({ credits, characters, selectedAvatar, onCreated, onNotify }: { credits: number; characters: Character[]; selectedAvatar: string; onCreated: (character: Character) => void; onNotify: (message: string) => void }) {
-  const [name, setName] = useState('Lua');
-  const [description, setDescription] = useState('Joven latina, extrovertida, trabaja creando contenido para redes. Mantener rostro, cabello, cuerpo y detalles de identidad.');
+function CreacionesView({ credits, plan, characters, selectedAvatar, onSelectAvatar, onCreated, onNotify }: { credits: number; plan: string; characters: Character[]; selectedAvatar: string; onSelectAvatar: (name: string) => void; onCreated: (character: Character) => void; onNotify: (message: string) => void }) {
+  const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
+  const activeCharacter = selectedSlot !== null ? characters[selectedSlot] : null;
+  const [name, setName] = useState(activeCharacter?.name ?? 'Lua');
+  const [description, setDescription] = useState(activeCharacter?.description ?? 'Joven latina, extrovertida, trabaja creando contenido para redes. Mantener rostro, cabello, cuerpo y detalles de identidad.');
   const [references, setReferences] = useState<Array<{ name: string; dataUrl: string }>>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState<Character | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const primaryPreview = references[0]?.dataUrl ?? media[1];
+  const primaryPreview = references[0]?.dataUrl ?? activeCharacter?.resultImage ?? media[1];
+  const slots = [0, 1, 2].map((slot) => {
+    const character = characters[slot];
+    return {
+      slot,
+      name: character?.name ?? (slot === 0 ? 'Lua' : 'Sin definir'),
+      image: character?.resultImage ?? media[slot === 0 ? 1 : slot === 1 ? 2 : 3],
+      description: character?.description ?? (slot === 0 ? 'Joven latina, extrovertida, trabaja creando contenido para redes. Mantener rostro, cabello, cuerpo y detalles de identidad.' : slot === 1 ? 'Disponible solo en Creator Pro. Crea un segundo avatar con otro estilo, look o personalidad.' : 'Disponible solo en Creator Pro. Crea un tercer avatar con un estilo diferente.'),
+      references: character?.references?.length ?? 0,
+      locked: slot > 0 && !planIsPro(plan),
+      character,
+    };
+  });
+  const usedSlots = Math.min(characters.length || 1, planIsPro(plan) ? 3 : 1);
   const exampleImages = [primaryPreview, ...media, ...references.map((reference) => reference.dataUrl)].slice(0, 7);
+
+  useEffect(() => {
+    if (selectedSlot === null) return;
+    const character = characters[selectedSlot];
+    setName(character?.name ?? (selectedSlot === 0 ? 'Lua' : ''));
+    setDescription(character?.description ?? '');
+    setReferences([]);
+    setSaved(null);
+    setError('');
+  }, [selectedSlot, characters]);
+
+  function openSlot(slot: number, locked: boolean) {
+    if (locked) { onNotify('Para crear más avatares necesitas activar Pro.'); return; }
+    setSelectedSlot(slot);
+    if (characters[slot]) onSelectAvatar(characters[slot].name);
+  }
 
   function addFiles(files: File[]) {
     if (!files.length) return;
-    if (references.length + files.length > 20) {
-      setError('Puedes subir máximo 20 imágenes de referencia.');
-      return;
-    }
+    if (references.length + files.length > 20) { setError('Puedes subir máximo 20 imágenes de referencia.'); return; }
     files.forEach((file) => {
-      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-        setError('Usa imágenes JPG, PNG o WebP.');
-        return;
-      }
-      if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
-        setError('Cada imagen debe pesar menos de 5 MB.');
-        return;
-      }
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setError('Usa imágenes JPG, PNG o WebP.'); return; }
+      if (file.size > MAX_REFERENCE_IMAGE_BYTES) { setError('Cada imagen debe pesar menos de 5 MB.'); return; }
       const reader = new FileReader();
       reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setReferences((current) => [...current, { name: file.name, dataUrl: reader.result as string }].slice(0, 20));
-          setError('');
-          setSaved(null);
-        }
+        if (typeof reader.result === 'string') { setReferences((current) => [...current, { name: file.name, dataUrl: reader.result as string }].slice(0, 20)); setError(''); setSaved(null); }
       };
       reader.readAsDataURL(file);
     });
@@ -1347,11 +1360,11 @@ function CreacionesView({ credits, characters, selectedAvatar, onCreated, onNoti
 
   async function createAvatar() {
     if (creating) return;
+    if (selectedSlot === null) { setError('Elige un avatar primero.'); return; }
     if (references.length < 20) { setError('Sube 20 imágenes del mismo avatar para que Soul pueda mantener la identidad.'); return; }
     if (!name.trim()) { setError('Ponle un nombre a tu avatar.'); return; }
     if (credits < IMAGE_CREDIT_COST) { setError('No tienes créditos suficientes para preparar este avatar.'); return; }
-    setCreating(true);
-    setError('');
+    setCreating(true); setError('');
     try {
       const urls: string[] = [];
       for (const image of references) {
@@ -1363,7 +1376,6 @@ function CreacionesView({ credits, characters, selectedAvatar, onCreated, onNoti
       const create = await fetch('/api/soul-character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), references: urls }) });
       const created = await create.json() as { id?: string; status?: string; error?: string };
       if (!create.ok || !created.id) throw new Error(created.error ?? 'Soul no pudo crear el avatar.');
-
       let ready = created.status === 'completed';
       for (let attempt = 0; attempt < 80 && !ready; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -1373,117 +1385,23 @@ function CreacionesView({ credits, characters, selectedAvatar, onCreated, onNoti
         ready = data.status === 'completed';
       }
       if (!ready) throw new Error('Soul sigue preparando el avatar. Inténtalo otra vez en unos minutos sin cambiar las fotos.');
+      const character: Character = { id: activeCharacter?.id ?? crypto.randomUUID(), name: name.trim(), description, referenceImage: urls[0], resultImage: primaryPreview, references: urls, soulId: created.id, gallery: activeCharacter?.gallery ?? [] };
+      setSaved(character); onCreated(character); onSelectAvatar(character.name); onNotify(`Avatar "${character.name}" guardado con Soul.`); setSelectedSlot(null);
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el avatar. Inténtalo nuevamente.'); }
+    finally { setCreating(false); }
+  }
 
-      const character: Character = {
-        id: crypto.randomUUID(),
-        name: name.trim(),
-        description,
-        referenceImage: urls[0],
-        resultImage: primaryPreview,
-        references: urls,
-        soulId: created.id,
-      };
-      setSaved(character);
-      onCreated(character);
-      onNotify(`Avatar "${character.name}" guardado con Soul.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo crear el avatar. Inténtalo nuevamente.');
-    } finally {
-      setCreating(false);
-    }
+  if (selectedSlot === null) {
+    return <div className="creaciones-view view-stack"><section className="creaciones-hero compact"><div><span className="eyebrow light">MIS AVATARES</span><h1>Mis Avatares</h1><p>Crea avatares consistentes con tu estilo. La versión gratuita permite 1 avatar. Con PRO puedes crear hasta 3 avatares.</p></div><span className="avatar-slot-count">{usedSlots}/3</span></section><section className="avatar-slot-board"><div className="avatar-slot-grid">{slots.map((slot) => <article className={`avatar-slot-card ${slot.character?.name === selectedAvatar ? 'is-active' : ''} ${slot.locked ? 'is-locked' : ''}`} key={slot.slot} onClick={() => openSlot(slot.slot, slot.locked)}><div className="avatar-slot-image"><img src={slot.image} alt={slot.name} /><span>{slot.slot === 0 ? 'Principal' : 'PRO'}</span>{slot.locked && <div className="slot-lock"><Lock size={24} /></div>}</div><label>Nombre del avatar<input value={slot.name} readOnly /></label><label>Descripción<textarea value={slot.description} readOnly /></label><div className="avatar-profile-meta"><span>Formato base: 3:4</span><span>Referencias: {slot.references}/20</span></div>{slot.locked ? <Button type="button" variant="secondary"><Crown size={16} /> Desbloquear con Pro</Button> : <Button type="button" variant={slot.character?.name === selectedAvatar ? 'default' : 'secondary'}>{slot.character ? 'Editar avatar' : 'Crear avatar'}</Button>}</article>)}</div><aside className="avatar-save-rail"><Button type="button" disabled><Check size={18} /> Guardar Avatares</Button><div className="avatar-status-card"><Check size={28} /><strong>Listo para guardar</strong><p>Completa hasta 3 avatares y guarda para usarlos en Crear Imagen.</p></div><div className="avatar-advice-card"><Sparkles size={26} /><strong>Consejos</strong><ul><li>Usa fotos de frente, perfil y cuerpo completo.</li><li>Incluye buena iluminación.</li><li>Muestra diferentes ángulos y expresiones.</li><li>No mezcles personas distintas.</li></ul></div></aside></section></div>;
   }
 
   return (
     <div className="creaciones-view view-stack">
-      <section className="creaciones-hero">
-        <div>
-          <span className="eyebrow light">CREACIONES</span>
-          <h1>Mi Avatar</h1>
-          <p>Sube 20 imágenes de referencia para crear avatares propios con Soul y mantener la misma identidad en tus próximas imágenes.</p>
-        </div>
-        <Button type="button" onClick={createAvatar} disabled={creating || references.length < 20}>
-          {creating ? <LoaderCircle className="spin" size={18} /> : <FolderHeart size={18} />} Guardar Avatar
-        </Button>
-      </section>
-
-      <section className="creaciones-grid">
-        <article className="avatar-profile-card">
-          <div className="avatar-profile-image"><img src={primaryPreview} alt="Vista previa del avatar" /></div>
-          <label>Nombre del avatar<input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} /></label>
-          <label>Descripción<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={600} /></label>
-          <div className="avatar-profile-meta"><span>Formato base: 3:4</span><span>Referencias: {references.length}/20</span></div>
-        </article>
-
-        <article className="reference-studio-card">
-          <div className="reference-title-row"><div><h2>Imágenes de Referencia</h2><p>Sube 20 fotos desde diferentes ángulos. Frente, perfil y cuerpo completo dan mejores resultados.</p></div><span>{references.length}/20</span></div>
-          <div className="reference-mosaic">
-            {Array.from({ length: 20 }).map((_, index) => {
-              const image = references[index];
-              return image ? (
-                <button type="button" key={`${image.name}-${index}`} onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Quitar referencia ${index + 1}`}>
-                  <img src={image.dataUrl} alt={`Referencia ${index + 1}`} /><span><X size={13} /></span>
-                </button>
-              ) : <div key={`empty-${index}`} className="reference-empty"><ImageIcon size={20} /></div>;
-            })}
-          </div>
-          <button type="button" className="reference-dropzone" onClick={() => inputRef.current?.click()} disabled={references.length >= 20}>
-            <Upload size={28} /><strong>Subir más imágenes</strong><small>JPG, PNG o WebP · 20 imágenes · máximo 5 MB cada una</small>
-          </button>
-          <input ref={inputRef} className="visually-hidden" type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; addFiles(files); }} />
-        </article>
-
-        <aside className="avatar-save-rail">
-          <Button type="button" onClick={createAvatar} disabled={creating || references.length < 20}>
-            {creating ? <LoaderCircle className="spin" size={18} /> : <Check size={18} />} {creating ? 'Creando avatar' : 'Guardar Avatar'}
-          </Button>
-          <div className={`avatar-status-card ${saved ? 'is-saved' : ''}`}>
-            <Check size={28} />
-            <strong>{saved ? 'Avatar guardado' : 'Listo para guardar'}</strong>
-            <p>{saved ? 'Estas imágenes serán usadas por Soul para mantener la misma identidad.' : 'Completa 20 referencias y guarda el avatar para usarlo en Crear Imagen.'}</p>
-          </div>
-          <div className="avatar-advice-card">
-            <Sparkles size={26} />
-            <strong>Consejos</strong>
-            <ul><li>Incluye fotos de frente, perfil y cuerpo completo.</li><li>Usa buena iluminación.</li><li>Muestra diferentes ángulos y expresiones.</li><li>No mezcles personas distintas.</li></ul>
-          </div>
-          {error && <p className="avatar-create-error">{error}</p>}
-        </aside>
-      </section>
-
-
-      <section className="avatar-folder-section">
-        <div className="section-title-row"><div><h2>Carpetas por avatar</h2><p>Cada avatar guarda aquí las imágenes que se generan con su identidad.</p></div></div>
-        <div className="avatar-folder-grid">
-          {characters.length ? characters.map((character) => (
-            <article className={`avatar-folder-card ${character.name === selectedAvatar ? 'is-active' : ''}`} key={character.id}>
-              <img src={character.resultImage} alt={`Carpeta de ${character.name}`} />
-              <div><strong>{character.name}</strong><small>{(character.gallery?.length ?? 0)} imágenes generadas</small></div>
-            </article>
-          )) : <p className="avatar-folder-empty">Aún no tienes carpetas. Crea un avatar para guardar su trabajo.</p>}
-        </div>
-      </section>
-
-      <section className="soul-flow-card">
-        <div className="section-title-row"><div><h2>¿Cómo funciona Soul?</h2><p>Soul analiza tus referencias y crea un perfil visual interno para generar nuevas imágenes con la misma identidad.</p></div></div>
-        <div className="soul-flow-grid">
-          {[
-            ['1', 'Tú subes las imágenes', 'Referencias reales del mismo avatar.'],
-            ['2', 'Soul analiza tu avatar', 'Rostro, cabello, cuerpo y detalles.'],
-            ['3', 'Crea un perfil visual', 'Una identidad interna reutilizable.'],
-            ['4', 'Tú pones el prompt', 'Defines lugar, pose y estilo.'],
-            ['5', 'Resultado consistente', 'Nueva imagen con el mismo avatar.'],
-          ].map((item, index) => <div className="soul-step" key={item[0]}><span>{item[0]}</span><img src={exampleImages[index] ?? media[1]} alt="Ejemplo Soul" /><strong>{item[1]}</strong><p>{item[2]}</p></div>)}
-        </div>
-      </section>
-
-      <section className="avatar-examples-strip">
-        <h2>Ejemplos de resultados con el mismo avatar</h2>
-        <div>{exampleImages.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`Ejemplo ${index + 1}`} />)}</div>
-      </section>
+      <section className="creaciones-hero compact"><div><span className="eyebrow light">AVATAR {selectedSlot + 1}</span><h1>{activeCharacter ? 'Editar avatar' : 'Crear avatar'}</h1><p>Sube 20 imágenes de referencia y completa los datos de este avatar.</p></div><Button type="button" variant="secondary" onClick={() => setSelectedSlot(null)}>Volver a Mis Avatares</Button></section>
+      <section className="creaciones-grid"><article className="avatar-profile-card"><div className="avatar-profile-image"><img src={primaryPreview} alt="Vista previa del avatar" /></div><label>Nombre del avatar<input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} /></label><label>Descripción<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={600} /></label><div className="avatar-profile-meta"><span>Formato base: 3:4</span><span>Referencias: {references.length}/20</span></div></article><article className="reference-studio-card"><div className="reference-title-row"><div><h2>Imágenes de Referencia</h2><p>Sube 20 fotos desde diferentes ángulos. Frente, perfil y cuerpo completo dan mejores resultados.</p></div><span>{references.length}/20</span></div><div className="reference-mosaic">{Array.from({ length: 20 }).map((_, index) => { const image = references[index]; return image ? <button type="button" key={`${image.name}-${index}`} onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Quitar referencia ${index + 1}`}><img src={image.dataUrl} alt={`Referencia ${index + 1}`} /><span><X size={13} /></span></button> : <div key={`empty-${index}`} className="reference-empty"><ImageIcon size={20} /></div>; })}</div><button type="button" className="reference-dropzone" onClick={() => inputRef.current?.click()} disabled={references.length >= 20}><Upload size={28} /><strong>Subir más imágenes</strong><small>JPG, PNG o WebP · 20 imágenes · máximo 5 MB cada una</small></button><input ref={inputRef} className="visually-hidden" type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; addFiles(files); }} /></article><aside className="avatar-save-rail"><Button type="button" onClick={createAvatar} disabled={creating || references.length < 20}>{creating ? <LoaderCircle className="spin" size={18} /> : <Check size={18} />} {creating ? 'Creando avatar' : 'Guardar Avatar'}</Button><div className={`avatar-status-card ${saved ? 'is-saved' : ''}`}><Check size={28} /><strong>{saved ? 'Avatar guardado' : 'Listo para guardar'}</strong><p>{saved ? 'Estas imágenes serán usadas por Soul para mantener la misma identidad.' : 'Completa 20 referencias y guarda el avatar para usarlo en Crear Imagen.'}</p></div><div className="avatar-advice-card"><Sparkles size={26} /><strong>Consejos</strong><ul><li>Incluye fotos de frente, perfil y cuerpo completo.</li><li>Usa buena iluminación.</li><li>Muestra diferentes ángulos y expresiones.</li><li>No mezcles personas distintas.</li></ul></div>{error && <p className="avatar-create-error">{error}</p>}</aside></section><section className="avatar-folder-section"><div className="section-title-row"><div><h2>Carpetas por avatar</h2><p>Cada avatar guarda aquí las imágenes que se generan con su identidad.</p></div></div><div className="avatar-folder-grid">{characters.length ? characters.map((character) => <article className={`avatar-folder-card ${character.name === selectedAvatar ? 'is-active' : ''}`} key={character.id}><img src={character.resultImage} alt={`Carpeta de ${character.name}`} /><div><strong>{character.name}</strong><small>{(character.gallery?.length ?? 0)} imágenes generadas</small></div></article>) : <p className="avatar-folder-empty">Aún no tienes carpetas. Crea un avatar para guardar su trabajo.</p>}</div></section><section className="avatar-examples-strip"><h2>Ejemplos de resultados con el mismo avatar</h2><div>{exampleImages.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`Ejemplo ${index + 1}`} />)}</div></section>
     </div>
   );
 }
-
 
 
 function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
