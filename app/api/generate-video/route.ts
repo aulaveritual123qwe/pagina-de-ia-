@@ -77,6 +77,7 @@ type SubmitBody = {
   mode?: unknown;
   referenceImage?: unknown;
   provider?: unknown;
+  voiceText?: unknown;
 };
 
 type WanSubmitResponse = {
@@ -145,6 +146,9 @@ async function klingAuthorization() {
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as SubmitBody | null;
   const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+  const voiceText = typeof body?.voiceText === 'string' ? body.voiceText.trim() : '';
+  if (voiceText.length > 280) return json({ error: 'El texto hablado debe tener máximo 280 caracteres.' }, 400);
+  const promptWithVoice = voiceText ? `${prompt}. La persona debe decir con voz natural en español: "${voiceText}". Sin subtítulos. Sin texto en pantalla. Sincroniza labios, expresión facial y respiración con esa frase.` : prompt;
   if (!prompt || prompt.length < 3 || prompt.length > 2000) {
     return json({ error: 'El prompt debe tener entre 3 y 2000 caracteres.' }, 400);
   }
@@ -180,7 +184,11 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           model: 'wan2.7-i2v-spicy',
           name: 'video-avatar',
-          prompt,
+          prompt: promptWithVoice,
+          voice_text: voiceText || undefined,
+          dialogue: voiceText || undefined,
+          generate_audio: Boolean(voiceText),
+          lip_sync: Boolean(voiceText),
           image_url: imageUrl,
           resolution: '720p',
           duration,
@@ -209,8 +217,8 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(35000),
       headers: { 'Content-Type': 'application/json', Authorization: auth },
       body: JSON.stringify(isImageToVideo
-        ? { model_name: 'kling-v2-6', image: imageUrl, prompt, mode: 'pro', duration: String(duration) }
-        : { model_name: 'kling-v2-6', prompt, aspect_ratio: ratio, mode: 'pro', duration: String(duration) }),
+        ? { model_name: 'kling-v2-6', image: imageUrl, prompt: promptWithVoice, mode: 'pro', duration: String(duration) }
+        : { model_name: 'kling-v2-6', prompt: promptWithVoice, aspect_ratio: ratio, mode: 'pro', duration: String(duration) }),
     });
     const payload = (await submitResponse.json().catch(() => null)) as KlingSubmitResponse | null;
     const taskId = payload?.data?.task_id;
@@ -230,12 +238,12 @@ export async function POST(request: Request) {
   const requestBody = isImageToVideo
     ? {
         model: WAN_I2V_MODEL,
-        input: { prompt, media: [{ type: 'first_frame', url: referenceImage }] },
+        input: { prompt: promptWithVoice, media: [{ type: 'first_frame', url: referenceImage }] },
         parameters: { resolution: '720P', duration },
       }
     : {
         model: 'wan2.7-t2v',
-        input: { prompt },
+        input: { prompt: promptWithVoice },
         parameters: { resolution: '720P', ratio, duration },
       };
 

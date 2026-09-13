@@ -1697,6 +1697,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false, pro
   const [studioMode, setStudioMode] = useState('Generar video');
   const [videoMode, setVideoMode] = useState(VIDEO_MODE_OPTIONS[0]);
   const [videoPrompt, setVideoPrompt] = useState('Lua caminando por una cafetería creativa, movimiento de cámara suave y luz cinematográfica.');
+  const [voiceScript, setVoiceScript] = useState('');
   const [duration, setDuration] = useState('5 segundos');
   const [ratio, setRatio] = useState('9:16');
   const [refImage, setRefImage] = useState<{ name: string; dataUrl: string } | null>(null);
@@ -1746,6 +1747,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false, pro
     setGenerating(true);
     setErrorMessage('');
     setStatusLabel('Enviando tu idea...');
+    const spokenPrompt = voiceScript.trim() ? `${videoPrompt.trim()}. Diálogo hablado en español: "${voiceScript.trim()}". La persona debe mover los labios de forma sincronizada, con voz natural y sin subtítulos.` : videoPrompt.trim();
     try {
       let taskId = pendingTask?.id;
       if (!taskId) {
@@ -1754,7 +1756,8 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false, pro
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: videoPrompt,
+          prompt: spokenPrompt,
+          voiceText: voiceScript.trim() || undefined,
           aspectRatio: ratio,
           duration: Number.parseInt(duration, 10),
           mode: isImageMode ? 'image' : 'text',
@@ -1844,6 +1847,10 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false, pro
             <Textarea value={videoPrompt} onChange={(event) => setVideoPrompt(event.target.value)} minLength={3} maxLength={2000} aria-describedby="video-prompt-help" />
           </label>
           <div className="video-prompt-help" id="video-prompt-help"><span>Incluye el lugar, la luz y la acción.</span><span>{videoPrompt.length}/2000</span></div>
+          <label className="video-prompt-label">Texto hablado (opcional)
+            <Textarea value={voiceScript} onChange={(event) => setVoiceScript(event.target.value)} maxLength={280} aria-describedby="video-voice-help" />
+          </label>
+          <div className="video-prompt-help" id="video-voice-help"><span>Escribe exactamente lo que debe decir. La IA intentará generar voz natural y labios sincronizados.</span><span>{voiceScript.length}/280</span></div>
           <div className="settings-grid">
             <SelectField label={`Duración · máximo ${provider === 'a2e' ? '10' : '12'} segundos`} value={duration} onChange={setDuration} options={durationOptions} />
             {isImageMode ? <p>Formato del video: se conserva el formato de la imagen de referencia.</p> : <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} />}

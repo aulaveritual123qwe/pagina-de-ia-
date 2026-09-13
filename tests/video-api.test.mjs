@@ -33,6 +33,15 @@ test('video API validates requests and uses A2E for image-to-video', async () =>
     assert.deepEqual(await (await POST(request({ prompt: 'Coffee scene', duration: 10, aspectRatio: '16:9' }))).json(), { taskId: 'kling:text:test-task' });
 
     globalThis.fetch = async (_url, options) => {
+      assert.equal(String(_url), 'https://api.klingai.com/v1/videos/text2video');
+      const body = JSON.parse(options.body);
+      assert.match(body.prompt, /Hola mundo/);
+      assert.match(body.prompt, /labios|voz natural/);
+      return Response.json({ data: { task_id: 'voice-task' } });
+    };
+    assert.deepEqual(await (await POST(request({ prompt: 'Talking scene', voiceText: 'Hola mundo', duration: 5, aspectRatio: '9:16' }))).json(), { taskId: 'kling:text:voice-task' });
+
+    globalThis.fetch = async (_url, options) => {
       assert.equal(String(_url), 'https://api.klingai.com/v1/videos/image2video');
       const body = JSON.parse(options.body);
       assert.ok(body.image.startsWith('https://studio.example/api/image/'));
