@@ -771,9 +771,9 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
           <img src="/assets/ad-creators-academy-logo.png" alt="Creators Academy Pro" />
         </div>
         <nav className="auth-nav" aria-label="Navegación">
-          <button type="button" onClick={() => onNotify('Ya estás en el inicio.')}>Inicio</button>
-          <button type="button" onClick={() => comingSoon('Precios')}>Precios</button>
-          <button type="button" onClick={() => comingSoon('El blog')}>Blog</button>
+          <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Inicio</button>
+          <button type="button" onClick={() => document.getElementById('landing-planes')?.scrollIntoView({ behavior: 'smooth' })}>Precios</button>
+          <button type="button" onClick={() => document.getElementById('landing-flujo')?.scrollIntoView({ behavior: 'smooth' })}>Cómo funciona</button>
           <button type="button" className="auth-nav-cta" onClick={() => switchMode('signup')}>Crear cuenta</button>
         </nav>
       </header>
@@ -785,11 +785,11 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
           <span className="auth-hero-tag"><Heart size={12} fill="currentColor" /> Create a better you</span>
           <div className="auth-hero-copy">
             <h1>Crea avatares realistas con IA<span>y lleva tu contenido al siguiente nivel</span></h1>
-            <p>Personajes consistentes, imágenes y videos listos para usar en tus proyectos, redes sociales o marca personal.</p>
+            <p>Una plataforma para crear avatares consistentes, imágenes, videos y piezas de contenido para redes sin perder la identidad visual de tus personajes.</p>
             <div className="auth-feature-row">
               <div><span><Users size={20} /></span><small>Avatares realistas</small></div>
               <div><span><ImageIcon size={20} /></span><small>Imágenes y videos</small></div>
-              <div><span><Coins size={20} /></span><small>Sin suscripciones complicadas</small></div>
+              <div><span><Coins size={20} /></span><small>Créditos y planes claros</small></div>
             </div>
           </div>
         </section>
@@ -887,6 +887,41 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
         </section>
       </div>
 
+
+
+      <section className="landing-proof" aria-label="Resumen de la plataforma">
+        <div><strong>20</strong><span>fotos para construir una identidad consistente</span></div>
+        <div><strong>3</strong><span>avatares disponibles en modo Pro</span></div>
+        <div><strong>4</strong><span>módulos: avatares, imágenes, video y biblioteca</span></div>
+        <div><strong>1</strong><span>flujo simple desde idea hasta descarga</span></div>
+      </section>
+
+      <section className="landing-flow" id="landing-flujo">
+        <div className="landing-section-copy">
+          <span className="eyebrow">CÓMO FUNCIONA</span>
+          <h2>De tus fotos a contenido listo para publicar</h2>
+          <p>Primero guardas la identidad del avatar. Luego eliges el personaje, escribes una idea y la plataforma mantiene rostro, estilo y detalles en cada creación.</p>
+        </div>
+        <div className="landing-flow-grid">
+          {[{ icon: Upload, title: 'Sube 20 referencias', copy: 'Fotos de frente, perfil y cuerpo completo para crear una base sólida.' }, { icon: Users, title: 'Guarda tu avatar', copy: 'La plataforma prepara una identidad interna para reutilizarla.' }, { icon: WandSparkles, title: 'Escribe tu idea', copy: 'Describe escenario, luz, ropa, acción y estilo visual.' }, { icon: Download, title: 'Descarga el resultado', copy: 'Genera imágenes o videos y guárdalos en tu biblioteca.' }].map((item) => <article key={item.title}><span><item.icon size={20} /></span><h3>{item.title}</h3><p>{item.copy}</p></article>)}
+        </div>
+      </section>
+
+      <section className="landing-modules">
+        <div className="landing-module-card featured"><span><Users size={22} /></span><h3>Avatares consistentes</h3><p>Crea una carpeta por avatar y reutiliza su identidad en imágenes nuevas.</p></div>
+        <div className="landing-module-card"><span><ImageIcon size={22} /></span><h3>Crear imagen</h3><p>Genera retratos, campañas, escenas lifestyle y piezas para redes.</p></div>
+        <div className="landing-module-card"><span><Video size={22} /></span><h3>Generar video</h3><p>Anima ideas, referencias y escenas cortas con movimiento de cámara.</p></div>
+        <div className="landing-module-card"><span><FolderHeart size={22} /></span><h3>Biblioteca</h3><p>Organiza resultados por avatar y descarga tus mejores creaciones.</p></div>
+      </section>
+
+      <section className="landing-plans" id="landing-planes">
+        <div>
+          <span className="eyebrow">PLANES</span>
+          <h2>Empieza gratis y libera más avatares cuando lo necesites</h2>
+          <p>El modo Free permite trabajar con un avatar. Pro desbloquea hasta 3 avatares y más capacidad para crear contenido comercial.</p>
+        </div>
+        <button type="button" onClick={() => switchMode('signup')}>Crear cuenta ahora <ArrowRight size={16} /></button>
+      </section>
       <footer className="auth-footer">
         <div className="auth-logo">
           <img src="/assets/ad-creators-academy-logo.png" alt="Creators Academy Pro" />
