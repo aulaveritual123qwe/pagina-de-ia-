@@ -315,13 +315,13 @@ async function checkTask(task: JobTask): Promise<JobTask> {
       const response = await fetch(`${A2E_API_BASE}/api/v1/userQwen2Image/detail/${task.ref}`, { headers: { Authorization: `Bearer ${apiToken}` }, signal: AbortSignal.timeout(25000) });
       const data = (await response.json().catch(() => null)) as A2ETaskResponse | null;
       if (!response.ok) return { ...task, error: describeProviderError(data?.message ?? data?.error, `El servicio respondió ${response.status}.`) };
-      const status = data?.data?.current_status ?? data?.current_status ?? data?.status;
-      if (['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'completed'].includes(status ?? '')) {
+      const status = (data?.data?.current_status ?? data?.current_status ?? data?.status ?? '').toUpperCase();
+      if (['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'COMPLETE', 'DONE'].includes(status)) {
         const url = extractA2EUrls(data)[0];
         return url ? { ...task, url } : { ...task, error: 'El servicio completó sin devolver imagen.' };
       }
-      if (['FAILED', 'FAILURE', 'failed', 'CANCELED', 'CANCELLED', 'UNKNOWN'].includes(status ?? '')) return { ...task, error: describeProviderError(data?.data?.failed_message ?? data?.message ?? data?.error, 'No se pudo generar la imagen.') };
-      if (!['PENDING', 'RUNNING', 'PROCESSING', 'QUEUED', 'sent', 'pending'].includes(status ?? '')) return { ...task, error: 'No se recibió un estado válido de la generación.' };
+      if (['FAILED', 'FAILURE', 'ERROR', 'CANCELED', 'CANCELLED', 'UNKNOWN'].includes(status)) return { ...task, error: describeProviderError(data?.data?.failed_message ?? data?.message ?? data?.error, 'No se pudo generar la imagen.') };
+      if (!['PENDING', 'RUNNING', 'PROCESSING', 'QUEUED', 'SENT', 'WAITING', 'IN_PROGRESS', ''].includes(status)) return { ...task, error: `El proveedor devolvió un estado no reconocido: ${status}.` };
       return task;
     }
     const apiKey = await providerSecret('KLING_API_KEY');

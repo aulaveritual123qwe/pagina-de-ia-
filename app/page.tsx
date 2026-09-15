@@ -94,6 +94,7 @@ const USERS_KEY = 'creators-users';
 function onboardedKey(email: string) { return `creators-onboarded:${email}`; }
 function charactersKey(email: string) { return `creators-characters:${email}`; }
 function userPlanKey(email: string) { return `creators-plan:${email}`; }
+function creditsKey(email: string) { return `creators-credits:${email}`; }
 function planIsPro(plan: string) { return plan !== 'Free'; }
 
 type Character = { id: string; name: string; referenceImage: string; resultImage: string; references?: string[]; soulId?: string; referenceId?: string; soulStatus?: string; description?: string; gallery?: string[] };
@@ -154,7 +155,7 @@ export default function HomePage() {
   const [specialFavorite, setSpecialFavorite] = useState(false);
   const [specialReferenceImage, setSpecialReferenceImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [specialIsGenerating, setSpecialIsGenerating] = useState(false);
-  const [credits, setCredits] = useState(320);
+  const [credits, setCredits] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState(media);
   const [resultSource, setResultSource] = useState<'demo' | 'live'>('demo');
@@ -191,6 +192,7 @@ export default function HomePage() {
       if (savedEmail) {
         setProfileName(users[savedEmail]?.name ?? nameFromEmail(savedEmail));
         setPlan(window.localStorage.getItem(userPlanKey(savedEmail)) ?? 'Free');
+        setCredits(Number(window.localStorage.getItem(creditsKey(savedEmail))) || 0);
         try {
           const savedCharacters = JSON.parse(window.localStorage.getItem(charactersKey(savedEmail)) ?? '[]');
           if (Array.isArray(savedCharacters)) setCharacters(savedCharacters);
@@ -209,6 +211,7 @@ export default function HomePage() {
     const users = loadUsers();
     setProfileName(users[email]?.name ?? nameFromEmail(email));
     setPlan(window.localStorage.getItem(userPlanKey(email)) ?? 'Free');
+    setCredits(Number(window.localStorage.getItem(creditsKey(email))) || 0);
     setView(openAdmin ? 'ajustes' : 'crear');
     notify(`Bienvenido de nuevo, ${nameFromEmail(email).split(' ')[0]}.`);
     try {
@@ -226,6 +229,34 @@ export default function HomePage() {
     window.localStorage.setItem(onboardedKey(accountEmail), 'true');
     setShowOnboarding(false);
   }
+
+  // Google's OAuth callback redirects back here with a one-time code (or an
+  // error) after the user approves access on Google's own consent screen.
+  useEffect(() => {
+    if (!sessionChecked) return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('google_auth');
+    const authError = params.get('google_auth_error');
+    if (!code && !authError) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    if (authError) { notify(authError); return; }
+    (async () => {
+      try {
+        const response = await fetch(`/api/auth/google/session?code=${encodeURIComponent(code as string)}`);
+        const data = (await response.json().catch(() => null)) as { email?: string; name?: string; error?: string } | null;
+        if (!response.ok || !data?.email) { notify(data?.error ?? 'No se pudo completar el acceso con Google.'); return; }
+        const cleanEmail = data.email.trim().toLowerCase();
+        const users = loadUsers();
+        if (!users[cleanEmail]) {
+          users[cleanEmail] = { name: data.name || nameFromEmail(cleanEmail), passwordHash: await hashPassword(crypto.randomUUID()) };
+          saveUsers(users);
+        }
+        handleLogin(cleanEmail);
+      } catch {
+        notify('No se pudo completar el acceso con Google.');
+      }
+    })();
+  }, [sessionChecked]);
 
   function saveCharacter(character: Character) {
     setCharacters((current) => {
@@ -246,6 +277,7 @@ export default function HomePage() {
     window.localStorage.removeItem(SESSION_KEY);
     setAccountEmail('');
     setPlan('Free');
+    setCredits(0);
     setProfileName('');
     setProfileMenuOpen(false);
     setNotificationOpen(false);
@@ -257,6 +289,31 @@ export default function HomePage() {
     setCharacters([]);
     setNotice('Cerraste sesión correctamente.');
   }
+
+  useEffect(() => {
+    if (accountEmail) window.localStorage.setItem(creditsKey(accountEmail), String(credits));
+  }, [credits, accountEmail]);
+
+  // Stripe redirects back here after checkout; the webhook is the source of truth
+  // for the new balance, so pull it from the server instead of guessing locally.
+  useEffect(() => {
+    if (!sessionChecked || !accountEmail) return;
+    const checkout = new URLSearchParams(window.location.search).get('checkout');
+    if (!checkout) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    if (checkout === 'success') {
+      fetch(`/api/credits?email=${encodeURIComponent(accountEmail)}`)
+        .then((response) => response.json())
+        .then((data: { credits?: number; plan?: string }) => {
+          if (typeof data.credits === 'number') setCredits(data.credits);
+          if (data.plan) setPlan(data.plan);
+          notify('¡Pago exitoso! Tus créditos se actualizaron.');
+        })
+        .catch(() => undefined);
+    } else if (checkout === 'cancel') {
+      notify('Pago cancelado.');
+    }
+  }, [sessionChecked, accountEmail]);
 
   useEffect(() => {
     const context = document.modelContext;
@@ -362,11 +419,24 @@ export default function HomePage() {
     return true;
   }
 
-  function selectPlan(name: string, includedCredits: number) {
-    setPlan(name);
-    if (accountEmail) window.localStorage.setItem(userPlanKey(accountEmail), name);
-    setCredits(includedCredits);
-    notify(`Plan ${name} activado en modo demostración.`);
+  async function startCheckout(kind: 'plan' | 'topup', planName?: string) {
+    if (!accountEmail) { notify('Inicia sesión para continuar con el pago.'); return; }
+    try {
+      const response = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: accountEmail, kind, planName }),
+      });
+      const data = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
+      if (!response.ok || !data?.url) { notify(data?.error ?? 'No se pudo iniciar el pago.'); return; }
+      window.location.href = data.url;
+    } catch {
+      notify('No se pudo conectar con la pasarela de pago.');
+    }
+  }
+
+  function selectPlan(name: string) {
+    void startCheckout('plan', name);
   }
 
   function useTemplate(name: string) {
@@ -618,7 +688,7 @@ export default function HomePage() {
           <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="kling" /></div>
           <div hidden={view !== 'especial' || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="a2e" /></div>
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
-          {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => { setCredits((current) => current + 700); notify('Se añadieron 700 créditos (recarga de US$9.90).'); }} />}
+          {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => void startCheckout('topup')} />}
           {view === 'ajustes' && (
             <SettingsView
               onNotify={notify}
@@ -757,7 +827,7 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string, openAdmin?:
   }
 
   function handleGoogleLogin() {
-    onNotify('El acceso con Google aún no está disponible. Inicia sesión con tu correo electrónico.');
+    window.location.href = '/api/auth/google';
   }
 
   async function handleAdminQuickAccess() {
@@ -1847,7 +1917,7 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false, pro
     <div className="view-stack">
       {!hideHeading && <PageHeading eyebrow="ESTUDIO DE VIDEO" title="Generar Video con IA" description="Describe una escena y conviértela en un video con inteligencia artificial." note="Ideas que se mueven" />}
       {provider === 'kling' && <SegmentedField label="Herramienta de video" value={studioMode} onChange={setStudioMode} options={['Generar video', 'Control de movimiento']} />}
-      {provider === 'kling' && <div hidden={studioMode !== 'Control de movimiento'}><MotionControlView /></div>}
+      {provider === 'kling' && <div hidden={studioMode !== 'Control de movimiento'}><MotionControlView credits={credits} onSpendCredits={onSpendCredits} /></div>}
       <section className="video-coming-card" style={provider === 'kling' && studioMode !== 'Generar video' ? { display: 'none' } : undefined}>
         <div className="video-coming-copy">
           <span><Video size={24} /></span>
@@ -1990,7 +2060,7 @@ function LibraryView({ images, search, favorites, onToggleFavorite, onUpload }: 
   );
 }
 
-function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string; onSelectPlan: (name: string, credits: number) => void; onTopUp: () => void }) {
+function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string; onSelectPlan: (name: string) => void; onTopUp: () => void }) {
   const plans = [
     { name: 'Inicial', price: '19', credits: '1.200', creditAmount: 1200, featured: false },
     { name: 'Creator', price: '32', credits: '2.500', creditAmount: 2500, featured: true },
@@ -1999,7 +2069,7 @@ function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string
   return (
     <div className="view-stack">
       <PageHeading eyebrow="CRECE A TU RITMO" title="Planes y créditos" description="Elige un plan claro. Sin costos ocultos y con tus créditos siempre visibles." note="Más espacio para crear" />
-      <div className="plans-grid">{plans.map((plan) => <article className={`plan-card ${plan.featured ? 'featured' : ''} ${currentPlan === plan.name ? 'current-plan' : ''}`} key={plan.name}>{plan.featured && <span className="popular">Más elegido</span>}<h2>{plan.name}</h2><p>Para creadores {plan.name === 'Inicial' ? 'que están empezando' : 'en crecimiento'}</p><div className="price"><span>US$</span><strong>{plan.price}</strong><small>/ mes</small></div><div className="plan-credits"><Coins size={20} /> <strong>{plan.credits}</strong> créditos al mes</div><ul><li><Check /> Generación de imágenes</li><li><Check /> Descargas en alta calidad</li><li><Check /> Biblioteca personal</li><li><Check /> Uso comercial</li></ul><Button variant={plan.featured ? 'default' : 'secondary'} type="button" onClick={() => onSelectPlan(plan.name, plan.creditAmount)}>{currentPlan === plan.name ? 'Plan actual' : `Elegir ${plan.name}`}</Button></article>)}</div>
+      <div className="plans-grid">{plans.map((plan) => <article className={`plan-card ${plan.featured ? 'featured' : ''} ${currentPlan === plan.name ? 'current-plan' : ''}`} key={plan.name}>{plan.featured && <span className="popular">Más elegido</span>}<h2>{plan.name}</h2><p>Para creadores {plan.name === 'Inicial' ? 'que están empezando' : 'en crecimiento'}</p><div className="price"><span>US$</span><strong>{plan.price}</strong><small>/ mes</small></div><div className="plan-credits"><Coins size={20} /> <strong>{plan.credits}</strong> créditos al mes</div><ul><li><Check /> Generación de imágenes</li><li><Check /> Descargas en alta calidad</li><li><Check /> Biblioteca personal</li><li><Check /> Uso comercial</li></ul><Button variant={plan.featured ? 'default' : 'secondary'} type="button" onClick={() => onSelectPlan(plan.name)}>{currentPlan === plan.name ? 'Plan actual' : `Elegir ${plan.name}`}</Button></article>)}</div>
       <section className="topup-banner"><div><Coins /><span><strong>¿Solo necesitas más créditos?</strong><small>Recarga 700 créditos por US$9.90 sin cambiar de plan.</small></span></div><Button variant="secondary" type="button" onClick={onTopUp}>Recargar 700 créditos</Button></section>
     </div>
   );
@@ -2012,8 +2082,8 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
   const [profile, setProfile] = useState({ name: profileName, email: accountEmail, language: 'Español', description: '' });
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPlan, setAdminPlan] = useState('Pro');
-  const [apiKeys, setApiKeys] = useState({ HIGGSFIELD_API_KEY: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '' });
-  const [apiStatus, setApiStatus] = useState({ soul: false, kling: false, a2e: false });
+  const [apiKeys, setApiKeys] = useState({ HIGGSFIELD_API_KEY: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' });
+  const [apiStatus, setApiStatus] = useState({ soul: false, kling: false, a2e: false, stripe: false, google: false });
 
   useEffect(() => {
     const saved = window.localStorage.getItem('creator-profile');
@@ -2029,7 +2099,7 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
     if (!isAdmin) return;
     fetch('/api/admin-apis', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((data: { configured?: { soul?: boolean; kling?: boolean; a2e?: boolean } }) => setApiStatus({ soul: Boolean(data.configured?.soul), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e) }))
+      .then((data: { configured?: { soul?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean } }) => setApiStatus({ soul: Boolean(data.configured?.soul), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google) }))
       .catch(() => undefined);
   }, [isAdmin]);
 
@@ -2039,10 +2109,10 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ adminEmail: accountEmail, keys: apiKeys }),
     });
-    const data = await response.json() as { configured?: { soul?: boolean; kling?: boolean; a2e?: boolean }; error?: string };
+    const data = await response.json() as { configured?: { soul?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean }; error?: string };
     if (!response.ok) { onNotify(data.error ?? 'No se pudieron guardar las APIs.'); return; }
-    setApiStatus({ soul: Boolean(data.configured?.soul), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e) });
-    setApiKeys({ HIGGSFIELD_API_KEY: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '' });
+    setApiStatus({ soul: Boolean(data.configured?.soul), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google) });
+    setApiKeys({ HIGGSFIELD_API_KEY: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' });
     onNotify('APIs vinculadas correctamente.');
   }
 
@@ -2079,11 +2149,13 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
           {isAdmin && <div className="admin-access-card api-admin-card">
             <h2>APIs de generación</h2>
             <p>Vincula las claves que usará la plataforma para Crear Imagen, Generar Video y Contenido. Las claves se guardan en el servidor y no se muestran completas.</p>
-            <div className="api-status-row"><span className={apiStatus.soul ? 'ready' : ''}>Avatares e imágenes</span><span className={apiStatus.kling ? 'ready' : ''}>Kling video</span><span className={apiStatus.a2e ? 'ready' : ''}>A2E Contenido</span></div>
+            <div className="api-status-row"><span className={apiStatus.soul ? 'ready' : ''}>Avatares e imágenes</span><span className={apiStatus.kling ? 'ready' : ''}>Kling video</span><span className={apiStatus.a2e ? 'ready' : ''}>A2E Contenido</span><span className={apiStatus.stripe ? 'ready' : ''}>Pagos (Stripe)</span><span className={apiStatus.google ? 'ready' : ''}>Login Google</span></div>
             <label>API Key de imágenes y avatares<input type="password" value={apiKeys.HIGGSFIELD_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, HIGGSFIELD_API_KEY: event.target.value })} placeholder="Key para crear avatares e imágenes" /></label>
             <label>Kling API Key<input type="password" value={apiKeys.KLING_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_API_KEY: event.target.value })} placeholder="Bearer/API key de Kling" /></label>
             <div className="api-two-cols"><label>Kling Access Key<input type="password" value={apiKeys.KLING_ACCESS_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_ACCESS_KEY: event.target.value })} /></label><label>Kling Secret Key<input type="password" value={apiKeys.KLING_SECRET_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_SECRET_KEY: event.target.value })} /></label></div>
             <label>A2E API Token<input type="password" value={apiKeys.A2E_API_TOKEN} onChange={(event) => setApiKeys({ ...apiKeys, A2E_API_TOKEN: event.target.value })} placeholder="Token para Qwen/Wan en Contenido" /></label>
+            <div className="api-two-cols"><label>Stripe Secret Key<input type="password" value={apiKeys.STRIPE_SECRET_KEY} onChange={(event) => setApiKeys({ ...apiKeys, STRIPE_SECRET_KEY: event.target.value })} placeholder="sk_live_... / sk_test_..." /></label><label>Stripe Webhook Secret<input type="password" value={apiKeys.STRIPE_WEBHOOK_SECRET} onChange={(event) => setApiKeys({ ...apiKeys, STRIPE_WEBHOOK_SECRET: event.target.value })} placeholder="whsec_..." /></label></div>
+            <div className="api-two-cols"><label>Google Client ID<input type="password" value={apiKeys.GOOGLE_CLIENT_ID} onChange={(event) => setApiKeys({ ...apiKeys, GOOGLE_CLIENT_ID: event.target.value })} placeholder="....apps.googleusercontent.com" /></label><label>Google Client Secret<input type="password" value={apiKeys.GOOGLE_CLIENT_SECRET} onChange={(event) => setApiKeys({ ...apiKeys, GOOGLE_CLIENT_SECRET: event.target.value })} /></label></div>
             <Button type="button" onClick={saveApiKeys}>Vincular APIs</Button>
           </div>}
 
@@ -2108,7 +2180,9 @@ function PreferenceRow({ icon: Icon, title, copy, checked, onChange }: { icon: t
 
 
 
-function MotionControlView() {
+const MOTION_CONTROL_CREDIT_COST_PER_SECOND = 25;
+
+function MotionControlView({ credits, onSpendCredits }: { credits: number; onSpendCredits: (amount: number, message: string) => boolean }) {
   const [uploading, setUploading] = useState(false);
   const [imageName, setImageName] = useState('');
   const [videoName, setVideoName] = useState('');
@@ -2160,9 +2234,11 @@ function MotionControlView() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo subir el archivo.'); }
     finally { URL.revokeObjectURL(preview); setUploading(false); }
   }
+  const cost = Math.max(1, Math.ceil(videoDuration || 0)) * MOTION_CONTROL_CREDIT_COST_PER_SECOND;
   async function generate() {
     if (lock.current || uploading) return;
     if (!task && orientation === 'Imagen del personaje' && videoDuration > 10) { setError('Con orientación de la imagen, usa un video de hasta 10 segundos.'); return; }
+    if (!task && credits < cost) { onSpendCredits(cost, ''); return; }
     lock.current = true; setBusy(true); setError('');
     try {
       let id = task;
@@ -2179,7 +2255,7 @@ function MotionControlView() {
         const data = await response.json() as { status?: string; url?: string; error?: string };
         if (!response.ok) throw new Error(data.error ?? 'No se pudo consultar el video.');
         if (data.status === 'FAILED') { setTask(''); throw new Error(data.error ?? 'La generación falló.'); }
-        if (data.status === 'SUCCEEDED' && data.url) { setResult(data.url); setTask(''); return; }
+        if (data.status === 'SUCCEEDED' && data.url) { setResult(data.url); setTask(''); onSpendCredits(cost, 'Video de Control de movimiento generado correctamente.'); return; }
       }
       throw new Error('El video sigue pendiente. Consulta el resultado sin crear una nueva tarea.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo generar el video.'); }
@@ -2197,9 +2273,9 @@ function MotionControlView() {
         <SelectField label="Orientación del personaje" value={orientation} onChange={setOrientation} options={['Video de referencia', 'Imagen del personaje']} />
         <SelectField label="Calidad" value={quality} onChange={setQuality} options={['Estándar', 'Profesional']} />
         <label className="motion-sound"><Switch checked={sound} onCheckedChange={setSound} /> Conservar audio original</label>
-        <p>{orientation === 'Video de referencia' ? 'Video de 3 a 12 segundos.' : 'Video de 3 a 10 segundos.'} El formato sigue la referencia; no se recorta la vista previa.</p>
+        <p>{orientation === 'Video de referencia' ? 'Video de 3 a 12 segundos.' : 'Video de 3 a 10 segundos.'} El formato sigue la referencia; no se recorta la vista previa. <strong>{MOTION_CONTROL_CREDIT_COST_PER_SECOND} créditos por segundo</strong> de video de referencia.</p>
       </fieldset>
-      <Button className="video-generate-button" onClick={generate} disabled={busy || uploading || (!task && (!imageUrl || !videoUrl))}>{uploading ? 'Subiendo referencia…' : busy ? <><LoaderCircle className="spin" /> Generando movimiento…</> : task ? 'Consultar resultado' : 'Generar movimiento'}</Button>
+      <Button className="video-generate-button" onClick={generate} disabled={busy || uploading || (!task && (!imageUrl || !videoUrl))}>{uploading ? 'Subiendo referencia…' : busy ? <><LoaderCircle className="spin" /> Generando movimiento…</> : task ? 'Consultar resultado' : <>Generar movimiento · {cost} créditos</>}</Button>
       {busy && <p role="status">Estamos procesando las referencias. Mantén esta página abierta.</p>}
       {error && <div className="video-error" role="alert">{error}</div>}
     </div>

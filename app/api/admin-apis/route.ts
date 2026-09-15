@@ -11,6 +11,10 @@ type ApiConfig = {
   KLING_ACCESS_KEY?: string;
   KLING_SECRET_KEY?: string;
   A2E_API_TOKEN?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
 };
 
 type Store = {
@@ -43,6 +47,8 @@ export async function GET() {
       soul: Boolean(process.env.HIGGSFIELD_API_KEY || (env as unknown as Record<string, string | undefined>).HIGGSFIELD_API_KEY || config?.HIGGSFIELD_API_KEY),
       kling: Boolean(process.env.KLING_API_KEY || process.env.KLING_ACCESS_KEY || (env as unknown as Record<string, string | undefined>).KLING_API_KEY || (env as unknown as Record<string, string | undefined>).KLING_ACCESS_KEY || config?.KLING_API_KEY || config?.KLING_ACCESS_KEY),
       a2e: Boolean(process.env.A2E_API_TOKEN || (env as unknown as Record<string, string | undefined>).A2E_API_TOKEN || config?.A2E_API_TOKEN),
+      stripe: Boolean(process.env.STRIPE_SECRET_KEY || (env as unknown as Record<string, string | undefined>).STRIPE_SECRET_KEY || config?.STRIPE_SECRET_KEY),
+      google: Boolean(process.env.GOOGLE_CLIENT_ID || (env as unknown as Record<string, string | undefined>).GOOGLE_CLIENT_ID || config?.GOOGLE_CLIENT_ID),
     },
     masked: {
       HIGGSFIELD_API_KEY: mask(config?.HIGGSFIELD_API_KEY),
@@ -50,6 +56,10 @@ export async function GET() {
       KLING_ACCESS_KEY: mask(config?.KLING_ACCESS_KEY),
       KLING_SECRET_KEY: mask(config?.KLING_SECRET_KEY),
       A2E_API_TOKEN: mask(config?.A2E_API_TOKEN),
+      STRIPE_SECRET_KEY: mask(config?.STRIPE_SECRET_KEY),
+      STRIPE_WEBHOOK_SECRET: mask(config?.STRIPE_WEBHOOK_SECRET),
+      GOOGLE_CLIENT_ID: mask(config?.GOOGLE_CLIENT_ID),
+      GOOGLE_CLIENT_SECRET: mask(config?.GOOGLE_CLIENT_SECRET),
     },
   });
 }
@@ -59,11 +69,11 @@ export async function POST(request: Request) {
   if (sanitize(body?.adminEmail).toLowerCase() !== ADMIN_EMAIL) return json({ error: 'Solo el administrador puede vincular APIs.' }, 403);
   const current = (await store().get(CONFIG_KEY, 'json').catch(() => null)) as ApiConfig | null;
   const next: ApiConfig = { ...(current ?? {}) };
-  const allowed: Array<keyof ApiConfig> = ['HIGGSFIELD_API_KEY', 'KLING_API_KEY', 'KLING_ACCESS_KEY', 'KLING_SECRET_KEY', 'A2E_API_TOKEN'];
+  const allowed: Array<keyof ApiConfig> = ['HIGGSFIELD_API_KEY', 'KLING_API_KEY', 'KLING_ACCESS_KEY', 'KLING_SECRET_KEY', 'A2E_API_TOKEN', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'];
   for (const key of allowed) {
     const value = sanitize(body?.keys?.[key]);
     if (value) next[key] = value;
   }
   await store().put(CONFIG_KEY, JSON.stringify(next));
-  return json({ ok: true, configured: { soul: Boolean(next.HIGGSFIELD_API_KEY), kling: Boolean(next.KLING_API_KEY || next.KLING_ACCESS_KEY), a2e: Boolean(next.A2E_API_TOKEN) } });
+  return json({ ok: true, configured: { soul: Boolean(next.HIGGSFIELD_API_KEY), kling: Boolean(next.KLING_API_KEY || next.KLING_ACCESS_KEY), a2e: Boolean(next.A2E_API_TOKEN), stripe: Boolean(next.STRIPE_SECRET_KEY), google: Boolean(next.GOOGLE_CLIENT_ID) } });
 }

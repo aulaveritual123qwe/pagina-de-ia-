@@ -9,6 +9,8 @@ type ApiConfig = {
     soul: boolean;
     kling: boolean;
     a2e: boolean;
+    stripe: boolean;
+    google: boolean;
   };
   masked: {
     HIGGSFIELD_API_KEY: string | null;
@@ -16,6 +18,10 @@ type ApiConfig = {
     KLING_ACCESS_KEY: string | null;
     KLING_SECRET_KEY: string | null;
     A2E_API_TOKEN: string | null;
+    STRIPE_SECRET_KEY: string | null;
+    STRIPE_WEBHOOK_SECRET: string | null;
+    GOOGLE_CLIENT_ID: string | null;
+    GOOGLE_CLIENT_SECRET: string | null;
   };
 };
 
@@ -33,6 +39,10 @@ export default function AdminPage() {
     KLING_ACCESS_KEY: '',
     KLING_SECRET_KEY: '',
     A2E_API_TOKEN: '',
+    STRIPE_SECRET_KEY: '',
+    STRIPE_WEBHOOK_SECRET: '',
+    GOOGLE_CLIENT_ID: '',
+    GOOGLE_CLIENT_SECRET: '',
   });
 
   useEffect(() => {
@@ -88,6 +98,10 @@ export default function AdminPage() {
           KLING_ACCESS_KEY: '',
           KLING_SECRET_KEY: '',
           A2E_API_TOKEN: '',
+          STRIPE_SECRET_KEY: '',
+          STRIPE_WEBHOOK_SECRET: '',
+          GOOGLE_CLIENT_ID: '',
+          GOOGLE_CLIENT_SECRET: '',
         });
         await loadConfig();
       } else {
@@ -118,7 +132,7 @@ export default function AdminPage() {
         {/* Status */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">📊 Estado de Servicios</h2>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-5 gap-4">
             <div className={`p-4 rounded-lg ${config?.configured.soul ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
               <div className="text-sm text-gray-400">Avatares e imágenes</div>
               <div className="text-lg font-bold">{config?.configured.soul ? '✅ Activo' : '❌ Inactivo'}</div>
@@ -138,6 +152,20 @@ export default function AdminPage() {
               <div className="text-lg font-bold">{config?.configured.a2e ? '✅ Activo' : '❌ Inactivo'}</div>
               {config?.masked.A2E_API_TOKEN && (
                 <div className="text-xs text-gray-500 mt-1">{config.masked.A2E_API_TOKEN}</div>
+              )}
+            </div>
+            <div className={`p-4 rounded-lg ${config?.configured.stripe ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
+              <div className="text-sm text-gray-400">Pagos (Stripe)</div>
+              <div className="text-lg font-bold">{config?.configured.stripe ? '✅ Activo' : '❌ Inactivo'}</div>
+              {config?.masked.STRIPE_SECRET_KEY && (
+                <div className="text-xs text-gray-500 mt-1">{config.masked.STRIPE_SECRET_KEY}</div>
+              )}
+            </div>
+            <div className={`p-4 rounded-lg ${config?.configured.google ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
+              <div className="text-sm text-gray-400">Login Google</div>
+              <div className="text-lg font-bold">{config?.configured.google ? '✅ Activo' : '❌ Inactivo'}</div>
+              {config?.masked.GOOGLE_CLIENT_ID && (
+                <div className="text-xs text-gray-500 mt-1">{config.masked.GOOGLE_CLIENT_ID}</div>
               )}
             </div>
           </div>
@@ -172,6 +200,10 @@ export default function AdminPage() {
               { key: 'KLING_ACCESS_KEY', label: '🎬 Kling Access Key' },
               { key: 'KLING_SECRET_KEY', label: '🔑 Kling Secret Key' },
               { key: 'A2E_API_TOKEN', label: '✨ A2E API Token' },
+              { key: 'STRIPE_SECRET_KEY', label: '💳 Stripe Secret Key (sk_live_... / sk_test_...)' },
+              { key: 'STRIPE_WEBHOOK_SECRET', label: '🔐 Stripe Webhook Signing Secret (whsec_...)' },
+              { key: 'GOOGLE_CLIENT_ID', label: '🔑 Google OAuth Client ID' },
+              { key: 'GOOGLE_CLIENT_SECRET', label: '🔐 Google OAuth Client Secret' },
             ].map(({ key, label }) => (
               <div key={key}>
                 <label className="block text-sm text-gray-400 mb-1">{label}</label>
@@ -204,6 +236,25 @@ export default function AdminPage() {
             <Save className="w-4 h-4" />
             {saving ? 'Guardando...' : 'Guardar API Keys'}
           </Button>
+        </div>
+
+        <div className="bg-gray-800 rounded-lg p-6 mb-8 text-sm text-gray-400">
+          <h2 className="text-lg font-semibold mb-2 text-white">💳 Cómo activar los pagos</h2>
+          <ol className="list-decimal list-inside space-y-1">
+            <li>En tu dashboard de Stripe, copia tu <strong>Secret key</strong> y pégala arriba.</li>
+            <li>Ve a Developers → Webhooks → Add endpoint, con esta URL: <code className="text-purple-300">{typeof window !== 'undefined' ? window.location.origin : ''}/api/stripe-webhook</code></li>
+            <li>Selecciona el evento <strong>checkout.session.completed</strong>.</li>
+            <li>Copia el <strong>Signing secret</strong> (whsec_...) del webhook y pégalo arriba.</li>
+          </ol>
+        </div>
+
+        <div className="bg-gray-800 rounded-lg p-6 mb-8 text-sm text-gray-400">
+          <h2 className="text-lg font-semibold mb-2 text-white">🔑 Cómo activar el acceso con Google</h2>
+          <ol className="list-decimal list-inside space-y-1">
+            <li>Ve a <a className="text-purple-300 underline" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console → Credentials</a> y crea un &quot;OAuth client ID&quot; de tipo Web application.</li>
+            <li>Agrega como &quot;Authorized redirect URI&quot; esta URL: <code className="text-purple-300">{typeof window !== 'undefined' ? window.location.origin : ''}/api/auth/google/callback</code></li>
+            <li>Copia el <strong>Client ID</strong> y el <strong>Client Secret</strong> y pégalos arriba.</li>
+          </ol>
         </div>
 
         <div className="text-gray-500 text-sm text-center">

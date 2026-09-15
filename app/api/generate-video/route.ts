@@ -98,6 +98,51 @@ type A2EStartResponse = {
   error?: string;
 };
 
+type A2ETtsListResponse = {
+  data?: Array<Record<string, unknown>> | Record<string, unknown>;
+  error?: string;
+  message?: string;
+};
+
+type A2ETtsResponse = {
+  data?: string | { url?: string; audio_url?: string };
+  error?: string;
+  message?: string;
+};
+
+// The Wan Spicy video model has no built-in text-to-speech: it only accepts a
+// pre-rendered audio_url. Spoken text is synthesized separately via A2E's TTS
+// endpoint first, then that audio is attached to the video generation request.
+async function synthesizeVoice(apiToken: string, text: string): Promise<string> {
+  const voiceListResponse = await fetch(`${A2E_API_BASE}/api/v1/anchor/tts_list`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(20000),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}` },
+  });
+  const voiceListPayload = (await voiceListResponse.json().catch(() => null)) as A2ETtsListResponse | null;
+  const voices = Array.isArray(voiceListPayload?.data) ? voiceListPayload.data : [];
+  const pickId = (voice: Record<string, unknown>) => voice._id ?? voice.id ?? voice.tts_id ?? voice.voice_id;
+  const spanishVoice = voices.find((voice) => {
+    const locale = String(voice.language ?? voice.lang ?? voice.locale ?? voice.country ?? '').toLowerCase();
+    return locale.includes('es') || locale.includes('span');
+  });
+  const ttsId = pickId(spanishVoice ?? voices[0] ?? {});
+  if (!ttsId) throw new Error('No se encontró una voz disponible para generar el audio.');
+
+  const ttsResponse = await fetch(`${A2E_API_BASE}/api/v1/video/send_tts`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(30000),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}` },
+    body: JSON.stringify({ msg: text, tts_id: ttsId, speechRate: 1, country: 'es', region: 'ES' }),
+  });
+  const ttsPayload = (await ttsResponse.json().catch(() => null)) as A2ETtsResponse | null;
+  const audioUrl = typeof ttsPayload?.data === 'string' ? ttsPayload.data : ttsPayload?.data?.url ?? ttsPayload?.data?.audio_url;
+  if (!ttsResponse.ok || !audioUrl) {
+    throw new Error(ttsPayload?.message ?? ttsPayload?.error ?? 'No se pudo generar el audio para el video.');
+  }
+  return audioUrl;
+}
+
 type A2EVideoTaskResponse = {
   data?: { current_status?: string; result_url?: string; failed_message?: string };
   current_status?: string;
@@ -177,6 +222,7 @@ export async function POST(request: Request) {
     if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     try {
       const imageUrl = await publishReferenceImage(referenceImage as string, new URL(request.url).origin);
+      const audioUrl = voiceText ? await synthesizeVoice(a2eToken, voiceText) : undefined;
       const submitResponse = await fetch(`${A2E_API_BASE}/api/v1/userWanSpicy/start`, {
         method: 'POST',
         signal: AbortSignal.timeout(35000),
@@ -185,10 +231,7 @@ export async function POST(request: Request) {
           model: 'wan2.7-i2v-spicy',
           name: 'video-avatar',
           prompt: promptWithVoice,
-          voice_text: voiceText || undefined,
-          dialogue: voiceText || undefined,
-          generate_audio: Boolean(voiceText),
-          lip_sync: Boolean(voiceText),
+          audio_url: audioUrl,
           image_url: imageUrl,
           resolution: '720p',
           duration,
@@ -289,17 +332,17 @@ export async function GET(request: Request) {
       });
       const payload = (await statusResponse.json().catch(() => null)) as A2EVideoTaskResponse | null;
       if (!statusResponse.ok) return json({ error: payload?.message ?? payload?.error ?? `No se pudo consultar el estado (${statusResponse.status}).` }, 502);
-      const status = payload?.data?.current_status ?? payload?.current_status ?? payload?.status;
-      if (['completed', 'COMPLETED', 'SUCCESS', 'SUCCEEDED'].includes(status ?? '')) {
+      const status = (payload?.data?.current_status ?? payload?.current_status ?? payload?.status ?? '').toUpperCase();
+      if (['COMPLETED', 'COMPLETE', 'SUCCESS', 'SUCCEEDED', 'DONE'].includes(status)) {
         const url = payload?.data?.result_url ?? payload?.result_url;
         if (!url) return json({ error: 'El proveedor completó la tarea sin devolver un video.' }, 502);
         return json({ status: 'SUCCEEDED', url });
       }
-      if (['failed', 'FAILED', 'CANCELED', 'CANCELLED', 'UNKNOWN'].includes(status ?? '')) {
+      if (['FAILED', 'FAILURE', 'ERROR', 'CANCELED', 'CANCELLED', 'UNKNOWN'].includes(status)) {
         return json({ status: 'FAILED', error: payload?.data?.failed_message ?? payload?.message ?? 'La generación de video falló.' });
       }
-      if (!['sent', 'pending', 'PENDING', 'RUNNING', 'PROCESSING', 'QUEUED'].includes(status ?? '')) {
-        return json({ error: 'El proveedor no devolvió un estado válido. Vuelve a consultar el video.' }, 502);
+      if (!['SENT', 'PENDING', 'RUNNING', 'PROCESSING', 'QUEUED', 'WAITING', 'IN_PROGRESS', ''].includes(status)) {
+        return json({ error: `El proveedor devolvió un estado no reconocido: ${status}.` }, 502);
       }
       return json({ status: 'RUNNING' });
     } catch (error) {
