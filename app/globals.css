@@ -518,6 +518,9 @@ button { font-weight: 500; }
 .auth-row button { background: transparent; border: 0; color: #b98bff; font-size: 13px; font-weight: 600; cursor: pointer; padding: 0; }
 .auth-submit { width: 100%; min-height: 50px; background: linear-gradient(110deg, #6528ee, #8b40ff 72%, #9e53ff); font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .auth-submit:hover { filter: brightness(1.05); }
+.admin-quick-access { width: 100%; min-height: 42px; margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid rgb(185 139 255 / 48%); border-radius: 10px; background: rgb(139 64 255 / 10%); color: #e1d3ff; font-size: 13px; font-weight: 700; cursor: pointer; transition: background 180ms var(--ease-out), border-color 180ms var(--ease-out), transform 180ms var(--ease-out); }
+.admin-quick-access:hover { background: rgb(139 64 255 / 22%); border-color: #c7a7ff; }
+.admin-quick-access:active { transform: translateY(1px); }
 .auth-switch { text-align: center; color: #b9b4c9; font-size: 13px; margin: 20px 0 0; }
 .auth-switch button { background: transparent; border: 0; color: #b98bff; font-weight: 700; cursor: pointer; padding: 0; }
 .auth-footer { display: flex; align-items: center; justify-content: space-between; padding: 22px 40px 30px; border-top: 1px solid rgb(255 255 255 / 8%); gap: 16px; flex-wrap: wrap; }

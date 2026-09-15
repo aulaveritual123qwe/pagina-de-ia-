@@ -203,13 +203,13 @@ export default function HomePage() {
     })();
   }, []);
 
-  function handleLogin(email: string) {
+  function handleLogin(email: string, openAdmin = false) {
     window.localStorage.setItem(SESSION_KEY, email);
     setAccountEmail(email);
     const users = loadUsers();
     setProfileName(users[email]?.name ?? nameFromEmail(email));
     setPlan(window.localStorage.getItem(userPlanKey(email)) ?? 'Free');
-    setView('crear');
+    setView(openAdmin ? 'ajustes' : 'crear');
     notify(`Bienvenido de nuevo, ${nameFromEmail(email).split(' ')[0]}.`);
     try {
       const savedCharacters = JSON.parse(window.localStorage.getItem(charactersKey(email)) ?? '[]');
@@ -217,7 +217,7 @@ export default function HomePage() {
     } catch {
       setCharacters([]);
     }
-    if (window.localStorage.getItem(onboardedKey(email)) !== 'true') {
+    if (!openAdmin && window.localStorage.getItem(onboardedKey(email)) !== 'true') {
       setShowOnboarding(true);
     }
   }
@@ -662,7 +662,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const ACCOUNT_EMAIL = 'admin@creatorsacademy.pro';
 const ACCOUNT_PASSWORD = 'Creators2026!';
 
-function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; onNotify: (message: string) => void }) {
+function LoginView({ onLogin, onNotify }: { onLogin: (email: string, openAdmin?: boolean) => void; onNotify: (message: string) => void }) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -758,6 +758,20 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
 
   function handleGoogleLogin() {
     onNotify('El acceso con Google aún no está disponible. Inicia sesión con tu correo electrónico.');
+  }
+
+  async function handleAdminQuickAccess() {
+    // This project is currently a local demo: there is a single administrator
+    // account and no external identity service yet. Keeping this action visible
+    // prevents the owner from being blocked by a manual credential entry.
+    const users = loadUsers();
+    users[ACCOUNT_EMAIL] = {
+      name: 'Admin',
+      passwordHash: await hashPassword(ACCOUNT_PASSWORD),
+    };
+    saveUsers(users);
+    persistRememberedEmail(ACCOUNT_EMAIL);
+    onLogin(ACCOUNT_EMAIL, true);
   }
 
   function comingSoon(label: string) {
@@ -875,6 +889,12 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string) => void; on
             <Button type="submit" className="auth-submit" disabled={submitting}>
               {submitting ? <LoaderCircle className="spin" size={18} /> : <>{mode === 'signup' ? 'Crear cuenta' : 'Iniciar sesión'} <ArrowRight size={18} /></>}
             </Button>
+
+            {mode === 'login' && (
+              <button type="button" className="admin-quick-access" onClick={handleAdminQuickAccess}>
+                <Settings size={16} /> Entrar como administrador de esta plataforma
+              </button>
+            )}
 
             <p className="auth-switch">
               {mode === 'signup' ? (
