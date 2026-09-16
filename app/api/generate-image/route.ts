@@ -174,6 +174,10 @@ async function submitKling(apiKey: string, prompt: string, size: string): Promis
 }
 
 const A2E_API_BASE = 'https://video.a2e.ai';
+// A2E's edge (Cloudflare-fronted) rejects requests with 403 when they arrive
+// without a browser-like User-Agent — which is how Workers' fetch() sends by
+// default. Spoofing one here is what makes calls from this Worker succeed.
+const A2E_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 type A2EStartResponse = {
   data?: { _id?: string; task_id?: string; taskId?: string };
@@ -226,7 +230,7 @@ async function submitA2E(apiToken: string, kind: 'a2e-qwen', endpoint: string, p
   const response = await fetch(`${A2E_API_BASE}${endpoint}`, {
     method: 'POST',
     signal: AbortSignal.timeout(35000),
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'User-Agent': A2E_USER_AGENT },
     body: JSON.stringify(payload),
   });
   const data = (await response.json().catch(() => null)) as A2EStartResponse | null;
@@ -312,7 +316,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
     if (task.kind === 'a2e-qwen') {
       const apiToken = await providerSecret('A2E_API_TOKEN');
       if (!apiToken) return { ...task, error: 'La generación de contenido no está configurada. Contacta al administrador.' };
-      const response = await fetch(`${A2E_API_BASE}/api/v1/userQwen2Image/detail/${task.ref}`, { headers: { Authorization: `Bearer ${apiToken}` }, signal: AbortSignal.timeout(25000) });
+      const response = await fetch(`${A2E_API_BASE}/api/v1/userQwen2Image/detail/${task.ref}`, { headers: { Authorization: `Bearer ${apiToken}`, 'User-Agent': A2E_USER_AGENT }, signal: AbortSignal.timeout(25000) });
       const data = (await response.json().catch(() => null)) as A2ETaskResponse | null;
       if (!response.ok) return { ...task, error: describeProviderError(data?.message ?? data?.error, `El servicio respondió ${response.status}.`) };
       const status = (data?.data?.current_status ?? data?.current_status ?? data?.status ?? '').toUpperCase();

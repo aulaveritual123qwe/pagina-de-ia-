@@ -10,6 +10,10 @@ const WAN_SUBMIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc
 const WAN_TASK_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/tasks';
 const WAN_I2V_MODEL = 'wan2.7-i2v-2026-04-25';
 const A2E_API_BASE = 'https://video.a2e.ai';
+// A2E's edge (Cloudflare-fronted) rejects requests with 403 when they arrive
+// without a browser-like User-Agent — which is how Workers' fetch() sends by
+// default. Spoofing one here is what makes calls from this Worker succeed.
+const A2E_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const KLING_API_BASE = 'https://api.klingai.com/v1/videos';
 
 function secret(name: string): string | undefined {
@@ -117,7 +121,7 @@ async function synthesizeVoice(apiToken: string, text: string): Promise<string> 
   const voiceListResponse = await fetch(`${A2E_API_BASE}/api/v1/anchor/tts_list`, {
     method: 'POST',
     signal: AbortSignal.timeout(20000),
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'User-Agent': A2E_USER_AGENT },
   });
   const voiceListPayload = (await voiceListResponse.json().catch(() => null)) as A2ETtsListResponse | null;
   const voices = Array.isArray(voiceListPayload?.data) ? voiceListPayload.data : [];
@@ -132,7 +136,7 @@ async function synthesizeVoice(apiToken: string, text: string): Promise<string> 
   const ttsResponse = await fetch(`${A2E_API_BASE}/api/v1/video/send_tts`, {
     method: 'POST',
     signal: AbortSignal.timeout(30000),
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'User-Agent': A2E_USER_AGENT },
     body: JSON.stringify({ msg: text, tts_id: ttsId, speechRate: 1, country: 'es', region: 'ES' }),
   });
   const ttsPayload = (await ttsResponse.json().catch(() => null)) as A2ETtsResponse | null;
@@ -226,7 +230,7 @@ export async function POST(request: Request) {
       const submitResponse = await fetch(`${A2E_API_BASE}/api/v1/userWanSpicy/start`, {
         method: 'POST',
         signal: AbortSignal.timeout(35000),
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${a2eToken}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${a2eToken}`, 'User-Agent': A2E_USER_AGENT },
         body: JSON.stringify({
           model: 'wan2.7-i2v-spicy',
           name: 'video-avatar',
@@ -327,7 +331,7 @@ export async function GET(request: Request) {
     const externalId = taskId.slice(4);
     try {
       const statusResponse = await fetch(`${A2E_API_BASE}/api/v1/userWanSpicy/${externalId}`, {
-        headers: { Authorization: `Bearer ${a2eToken}` },
+        headers: { Authorization: `Bearer ${a2eToken}`, 'User-Agent': A2E_USER_AGENT },
         signal: AbortSignal.timeout(25000),
       });
       const payload = (await statusResponse.json().catch(() => null)) as A2EVideoTaskResponse | null;
