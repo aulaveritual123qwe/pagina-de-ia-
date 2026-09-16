@@ -1552,6 +1552,9 @@ button { font-weight: 500; }
 .checkout-field input { min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #e4e1ee; font-size: 14px; font-weight: 400; }
 .checkout-pending { text-align: center; padding: 20px 4px; }
 .checkout-pending p { color: #7b8094; font-size: 13px; line-height: 1.6; margin-top: 8px; }
+.checkout-proof-upload { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 96px; border: 1px dashed #d8d3ea; border-radius: 10px; color: #7b8094; font-size: 12px; font-weight: 400; cursor: pointer; overflow: hidden; }
+.checkout-proof-upload img { width: 100%; height: 96px; object-fit: cover; }
+.checkout-proof-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
 /* Contenido especial: black surfaces and rose accents from the supplied reference. */
 .special-theme {

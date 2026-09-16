@@ -2171,6 +2171,7 @@ function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCard
 }) {
   const [method, setMethod] = useState<'yape' | 'tarjeta'>('yape');
   const [payerPhone, setPayerPhone] = useState('');
+  const [proofImage, setProofImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -2179,10 +2180,26 @@ function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCard
   const credits = details?.credits ?? TOPUP.credits;
   const title = kind === 'plan' ? `Plan ${planName}` : 'Recarga de créditos';
 
+  function handleProofSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { onNotify('La imagen debe pesar menos de 8 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setProofImage({ name: file.name, dataUrl: reader.result });
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function submitYapeClaim() {
     const cleanPhone = payerPhone.replace(/\D/g, '');
     if (!/^9\d{8}$/.test(cleanPhone)) {
       onNotify('Ingresa un número de celular peruano válido (9 dígitos).');
+      return;
+    }
+    if (!proofImage) {
+      onNotify('Sube una captura de pantalla del pago de Yape.');
       return;
     }
     setSubmitting(true);
@@ -2190,7 +2207,7 @@ function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCard
       const response = await fetch('/api/payments/yape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: accountEmail, kind, planName, payerPhone: cleanPhone }),
+        body: JSON.stringify({ email: accountEmail, kind, planName, payerPhone: cleanPhone, proofImage: proofImage.dataUrl }),
       });
       const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
       if (!response.ok || !data?.ok) { onNotify(data?.error ?? 'No se pudo registrar tu pago.'); return; }
@@ -2238,6 +2255,13 @@ function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCard
                 <label className="checkout-field">
                   Tu número de celular (con el que pagaste)
                   <input type="tel" inputMode="numeric" placeholder="987654321" value={payerPhone} onChange={(event) => setPayerPhone(event.target.value)} maxLength={9} />
+                </label>
+                <label className="checkout-field">
+                  Captura de pantalla del pago
+                  <label className="checkout-proof-upload">
+                    {proofImage ? <img src={proofImage.dataUrl} alt="Comprobante de pago" /> : <><Upload size={20} /><span>Sube tu comprobante</span></>}
+                    <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleProofSelect} />
+                  </label>
                 </label>
                 <Button type="button" className="auth-submit" disabled={submitting} onClick={submitYapeClaim}>
                   {submitting ? <LoaderCircle className="spin" size={18} /> : 'Ya pagué, notificar al administrador'}

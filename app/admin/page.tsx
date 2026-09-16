@@ -12,6 +12,7 @@ type YapeRequest = {
   credits: number;
   priceUsd: number;
   payerPhone: string;
+  proofImageUrl?: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: number;
 };
@@ -88,6 +89,9 @@ export default function AdminPage() {
 
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [paymentsLoading, setPaymentsLoading] = useState(true);
+
+  const [tab, setTab] = useState<'resumen' | 'usuarios' | 'pagos'>('resumen');
+  const pendingYapeCount = yapeRequests.filter((req) => req.status === 'pending').length;
 
   function authParams() {
     return { adminEmail, adminPassword };
@@ -267,6 +271,23 @@ export default function AdminPage() {
           </div>
         )}
 
+        <div className="flex gap-2 mb-8 border-b border-gray-700">
+          {[
+            { id: 'resumen' as const, label: '⚙️ Resumen' },
+            { id: 'usuarios' as const, label: `👥 Usuarios (${usersTotal})` },
+            { id: 'pagos' as const, label: `💳 Pagos${pendingYapeCount ? ` (${pendingYapeCount} por revisar)` : ''}` },
+          ].map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTab(item.id)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === item.id ? 'border-purple-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
         {/* Login */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4 flex items-center gap-2"><Lock className="w-5 h-5" /> Acceso de administrador</h2>
@@ -290,6 +311,8 @@ export default function AdminPage() {
           </div>
         </div>
 
+        {tab === 'resumen' && (
+        <>
         {/* Status */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">📊 Estado de Servicios</h2>
@@ -332,6 +355,11 @@ export default function AdminPage() {
           </div>
         </div>
 
+        </>
+        )}
+
+        {tab === 'usuarios' && (
+        <>
         {/* Users */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -385,6 +413,11 @@ export default function AdminPage() {
           )}
         </div>
 
+        </>
+        )}
+
+        {tab === 'pagos' && (
+        <>
         {/* Payment history */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -436,13 +469,20 @@ export default function AdminPage() {
           ) : (
             <div className="space-y-3">
               {yapeRequests.map((req) => (
-                <div key={req.id} className="flex items-center justify-between bg-gray-700/50 border border-gray-600/50 rounded-lg p-4">
-                  <div>
-                    <div className="font-semibold">{req.email}</div>
-                    <div className="text-sm text-gray-400">
-                      {req.kind === 'plan' ? `Plan ${req.planName}` : 'Recarga'} · {req.credits} créditos · US$ {req.priceUsd} · Pagó desde {req.payerPhone}
+                <div key={req.id} className="flex items-center justify-between gap-4 bg-gray-700/50 border border-gray-600/50 rounded-lg p-4">
+                  <div className="flex items-center gap-4">
+                    {req.proofImageUrl && (
+                      <a href={req.proofImageUrl} target="_blank" rel="noreferrer" title="Ver comprobante completo">
+                        <img src={req.proofImageUrl} alt="Comprobante de pago" className="w-16 h-16 object-cover rounded-lg border border-gray-600" />
+                      </a>
+                    )}
+                    <div>
+                      <div className="font-semibold">{req.email}</div>
+                      <div className="text-sm text-gray-400">
+                        {req.kind === 'plan' ? `Plan ${req.planName}` : 'Recarga'} · {req.credits} créditos · US$ {req.priceUsd} · Pagó desde {req.payerPhone}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">{new Date(req.createdAt).toLocaleString('es-PE')}</div>
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">{new Date(req.createdAt).toLocaleString('es-PE')}</div>
                   </div>
                   {req.status === 'pending' ? (
                     <div className="flex gap-2">
@@ -463,7 +503,11 @@ export default function AdminPage() {
             </div>
           )}
         </div>
+        </>
+        )}
 
+        {tab === 'resumen' && (
+        <>
         {/* API keys form */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">🔐 Configurar API Keys y contraseña</h2>
@@ -537,6 +581,8 @@ export default function AdminPage() {
             <li>Copia el <strong>Client ID</strong> y el <strong>Client Secret</strong> y pégalos arriba.</li>
           </ol>
         </div>
+        </>
+        )}
 
         <div className="text-gray-500 text-sm text-center">
           Este panel es solo para administradores. Solo usa el email autorizado.
