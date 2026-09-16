@@ -1,8 +1,20 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Eye, EyeOff, Save, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Save, AlertCircle, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+
+type YapeRequest = {
+  id: string;
+  email: string;
+  kind: 'plan' | 'topup';
+  planName: string;
+  credits: number;
+  priceUsd: number;
+  payerPhone: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+};
 
 type ApiConfig = {
   configured: {
@@ -45,9 +57,44 @@ export default function AdminPage() {
     GOOGLE_CLIENT_SECRET: '',
   });
 
+  const [yapeRequests, setYapeRequests] = useState<YapeRequest[]>([]);
+  const [yapeLoading, setYapeLoading] = useState(true);
+  const [reviewingId, setReviewingId] = useState('');
+
   useEffect(() => {
     loadConfig();
+    loadYapeRequests();
   }, []);
+
+  async function loadYapeRequests() {
+    setYapeLoading(true);
+    try {
+      const res = await fetch(`/api/payments/yape?adminEmail=${encodeURIComponent('admin@creatorsacademy.pro')}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json() as { requests?: YapeRequest[] };
+        setYapeRequests(data.requests ?? []);
+      }
+    } catch { /* ignore */ }
+    finally { setYapeLoading(false); }
+  }
+
+  async function reviewYapeRequest(requestId: string, action: 'approve' | 'reject') {
+    setReviewingId(requestId);
+    try {
+      const res = await fetch('/api/payments/yape/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminEmail: 'admin@creatorsacademy.pro', requestId, action }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) { setMessage(`❌ Error: ${data.error}`); return; }
+      await loadYapeRequests();
+    } catch {
+      setMessage('❌ No se pudo actualizar la solicitud.');
+    } finally {
+      setReviewingId('');
+    }
+  }
 
   async function loadConfig() {
     try {
@@ -236,6 +283,46 @@ export default function AdminPage() {
             <Save className="w-4 h-4" />
             {saving ? 'Guardando...' : 'Guardar API Keys'}
           </Button>
+        </div>
+
+        <div className="bg-gray-800 rounded-lg p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">📱 Solicitudes de pago Yape</h2>
+            <Button variant="ghost" size="sm" onClick={loadYapeRequests} className="text-gray-400 hover:text-white">Actualizar</Button>
+          </div>
+          {yapeLoading ? (
+            <p className="text-gray-400 text-sm">Cargando...</p>
+          ) : yapeRequests.length === 0 ? (
+            <p className="text-gray-400 text-sm">No hay solicitudes todavía.</p>
+          ) : (
+            <div className="space-y-3">
+              {yapeRequests.map((req) => (
+                <div key={req.id} className="flex items-center justify-between bg-gray-700/50 border border-gray-600/50 rounded-lg p-4">
+                  <div>
+                    <div className="font-semibold">{req.email}</div>
+                    <div className="text-sm text-gray-400">
+                      {req.kind === 'plan' ? `Plan ${req.planName}` : 'Recarga'} · {req.credits} créditos · US$ {req.priceUsd} · Pagó desde {req.payerPhone}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">{new Date(req.createdAt).toLocaleString('es-PE')}</div>
+                  </div>
+                  {req.status === 'pending' ? (
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={reviewingId === req.id} onClick={() => reviewYapeRequest(req.id, 'approve')} className="bg-green-600 hover:bg-green-700 text-white flex gap-1">
+                        <Check className="w-4 h-4" /> Aprobar
+                      </Button>
+                      <Button size="sm" variant="secondary" disabled={reviewingId === req.id} onClick={() => reviewYapeRequest(req.id, 'reject')} className="flex gap-1">
+                        <X className="w-4 h-4" /> Rechazar
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className={`text-sm font-semibold ${req.status === 'approved' ? 'text-green-400' : 'text-red-400'}`}>
+                      {req.status === 'approved' ? '✅ Aprobado' : '❌ Rechazado'}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="bg-gray-800 rounded-lg p-6 mb-8 text-sm text-gray-400">

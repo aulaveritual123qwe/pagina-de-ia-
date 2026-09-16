@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   Coins,
+  CreditCard,
   Crown,
   Download,
   Eye,
@@ -27,6 +28,7 @@ import {
   Play,
   Search,
   Settings,
+  Smartphone,
   Sparkles,
   Upload,
   Users,
@@ -46,6 +48,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { generateImages } from '@/lib/image-provider';
+import { PLANS, TOPUP, YAPE_PHONE } from '@/lib/plans';
 
 type View = 'inicio' | 'creaciones' | 'crear' | 'video' | 'especial' | 'biblioteca' | 'planes' | 'ajustes';
 
@@ -95,6 +98,7 @@ function onboardedKey(email: string) { return `creators-onboarded:${email}`; }
 function charactersKey(email: string) { return `creators-characters:${email}`; }
 function userPlanKey(email: string) { return `creators-plan:${email}`; }
 function creditsKey(email: string) { return `creators-credits:${email}`; }
+function ageVerifiedKey(email: string) { return `creators-age-verified:${email}`; }
 function planIsPro(plan: string) { return plan !== 'Free'; }
 
 type Character = { id: string; name: string; referenceImage: string; resultImage: string; references?: string[]; soulId?: string; referenceId?: string; soulStatus?: string; description?: string; gallery?: string[] };
@@ -133,6 +137,8 @@ export default function HomePage() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [view, setView] = useState<View>('crear');
   const [specialMode, setSpecialMode] = useState('Crear imagen');
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [checkout, setCheckout] = useState<{ kind: 'plan' | 'topup'; planName?: string } | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [prompt, setPrompt] = useState(
     'Retrato editorial en una cafetería creativa, luz cálida, reflejos violeta, fotografía realista y natural.',
@@ -193,6 +199,7 @@ export default function HomePage() {
         setProfileName(users[savedEmail]?.name ?? nameFromEmail(savedEmail));
         setPlan(window.localStorage.getItem(userPlanKey(savedEmail)) ?? 'Free');
         setCredits(Number(window.localStorage.getItem(creditsKey(savedEmail))) || 0);
+        setAgeConfirmed(window.localStorage.getItem(ageVerifiedKey(savedEmail)) === 'true');
         try {
           const savedCharacters = JSON.parse(window.localStorage.getItem(charactersKey(savedEmail)) ?? '[]');
           if (Array.isArray(savedCharacters)) setCharacters(savedCharacters);
@@ -212,6 +219,7 @@ export default function HomePage() {
     setProfileName(users[email]?.name ?? nameFromEmail(email));
     setPlan(window.localStorage.getItem(userPlanKey(email)) ?? 'Free');
     setCredits(Number(window.localStorage.getItem(creditsKey(email))) || 0);
+    setAgeConfirmed(window.localStorage.getItem(ageVerifiedKey(email)) === 'true');
     setView(openAdmin ? 'ajustes' : 'crear');
     notify(`Bienvenido de nuevo, ${nameFromEmail(email).split(' ')[0]}.`);
     try {
@@ -278,6 +286,7 @@ export default function HomePage() {
     setAccountEmail('');
     setPlan('Free');
     setCredits(0);
+    setAgeConfirmed(false);
     setProfileName('');
     setProfileMenuOpen(false);
     setNotificationOpen(false);
@@ -375,6 +384,11 @@ export default function HomePage() {
     setMobileNav(false);
   }
 
+  function confirmAge() {
+    if (accountEmail) window.localStorage.setItem(ageVerifiedKey(accountEmail), 'true');
+    setAgeConfirmed(true);
+  }
+
   function notify(message: string) {
     setNotice(message);
   }
@@ -436,7 +450,7 @@ export default function HomePage() {
   }
 
   function selectPlan(name: string) {
-    void startCheckout('plan', name);
+    setCheckout({ kind: 'plan', planName: name });
   }
 
   function useTemplate(name: string) {
@@ -607,7 +621,20 @@ export default function HomePage() {
         </header>
 
         <main className="content-area" aria-label={activeLabel}>
-          {view === 'especial' && (
+          {view === 'especial' && !ageConfirmed && (
+            <div className="age-gate view-stack">
+              <div className="age-gate-card">
+                <Lock size={32} />
+                <h2>Contenido para mayores de 18 años</h2>
+                <p>Esta sección puede incluir contenido para audiencia adulta. Al continuar confirmas que tienes 18 años o más.</p>
+                <div className="age-gate-actions">
+                  <Button type="button" onClick={confirmAge}>Tengo 18 años o más, continuar</Button>
+                  <Button type="button" variant="secondary" onClick={() => navigate('inicio')}>Volver al inicio</Button>
+                </div>
+              </div>
+            </div>
+          )}
+          {view === 'especial' && ageConfirmed && (
             <div className="special-content-heading view-stack">
               <PageHeading eyebrow="ESTUDIO CREATIVO" title="Contenido" description="Crea imágenes y genera videos en un solo lugar." note="Imagina · Crea · Comparte" />
               <div className="special-content-modes" role="group" aria-label="Tipo de contenido">
@@ -651,7 +678,7 @@ export default function HomePage() {
               onReferenceImageChange={setReferenceImage}
             />
           )}
-          {view === 'especial' && specialMode === 'Crear imagen' && (
+          {view === 'especial' && ageConfirmed && specialMode === 'Crear imagen' && (
             <CreateView
               hideHeading
               avatars={characters}
@@ -686,9 +713,19 @@ export default function HomePage() {
           {view === 'inicio' && <DashboardView onNavigate={navigate} credits={credits} />}
           {view === 'creaciones' && <CreacionesView credits={credits} plan={plan} characters={characters} selectedAvatar={selectedAvatar} onSelectAvatar={setSelectedAvatar} onCreated={saveCharacter} onNotify={notify} />}
           <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="kling" /></div>
-          <div hidden={view !== 'especial' || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="a2e" /></div>
+          <div hidden={view !== 'especial' || !ageConfirmed || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="a2e" /></div>
           {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
-          {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => void startCheckout('topup')} />}
+          {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => setCheckout({ kind: 'topup' })} />}
+          {checkout && (
+            <CheckoutPanel
+              kind={checkout.kind}
+              planName={checkout.planName}
+              accountEmail={accountEmail}
+              onClose={() => setCheckout(null)}
+              onNotify={notify}
+              onCardCheckout={(kind, planName) => { setCheckout(null); void startCheckout(kind, planName); }}
+            />
+          )}
           {view === 'ajustes' && (
             <SettingsView
               onNotify={notify}
@@ -2071,6 +2108,98 @@ function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string
       <PageHeading eyebrow="CRECE A TU RITMO" title="Planes y créditos" description="Elige un plan claro. Sin costos ocultos y con tus créditos siempre visibles." note="Más espacio para crear" />
       <div className="plans-grid">{plans.map((plan) => <article className={`plan-card ${plan.featured ? 'featured' : ''} ${currentPlan === plan.name ? 'current-plan' : ''}`} key={plan.name}>{plan.featured && <span className="popular">Más elegido</span>}<h2>{plan.name}</h2><p>Para creadores {plan.name === 'Inicial' ? 'que están empezando' : 'en crecimiento'}</p><div className="price"><span>US$</span><strong>{plan.price}</strong><small>/ mes</small></div><div className="plan-credits"><Coins size={20} /> <strong>{plan.credits}</strong> créditos al mes</div><ul><li><Check /> Generación de imágenes</li><li><Check /> Descargas en alta calidad</li><li><Check /> Biblioteca personal</li><li><Check /> Uso comercial</li></ul><Button variant={plan.featured ? 'default' : 'secondary'} type="button" onClick={() => onSelectPlan(plan.name)}>{currentPlan === plan.name ? 'Plan actual' : `Elegir ${plan.name}`}</Button></article>)}</div>
       <section className="topup-banner"><div><Coins /><span><strong>¿Solo necesitas más créditos?</strong><small>Recarga 700 créditos por US$9.90 sin cambiar de plan.</small></span></div><Button variant="secondary" type="button" onClick={onTopUp}>Recargar 700 créditos</Button></section>
+    </div>
+  );
+}
+
+function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCardCheckout }: {
+  kind: 'plan' | 'topup';
+  planName?: string;
+  accountEmail: string;
+  onClose: () => void;
+  onNotify: (message: string) => void;
+  onCardCheckout: (kind: 'plan' | 'topup', planName?: string) => void;
+}) {
+  const [method, setMethod] = useState<'yape' | 'tarjeta'>('yape');
+  const [payerPhone, setPayerPhone] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  const details = kind === 'plan' && planName ? PLANS[planName] : null;
+  const priceUsd = details?.priceUsd ?? TOPUP.priceUsd;
+  const credits = details?.credits ?? TOPUP.credits;
+  const title = kind === 'plan' ? `Plan ${planName}` : 'Recarga de créditos';
+
+  async function submitYapeClaim() {
+    const cleanPhone = payerPhone.replace(/\D/g, '');
+    if (!/^9\d{8}$/.test(cleanPhone)) {
+      onNotify('Ingresa un número de celular peruano válido (9 dígitos).');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const response = await fetch('/api/payments/yape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: accountEmail, kind, planName, payerPhone: cleanPhone }),
+      });
+      const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !data?.ok) { onNotify(data?.error ?? 'No se pudo registrar tu pago.'); return; }
+      setSubmitted(true);
+    } catch {
+      onNotify('No se pudo registrar tu pago. Inténtalo nuevamente.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="onboarding-overlay" role="dialog" aria-modal="true" aria-label="Completar pago">
+      <div className="onboarding-card checkout-card">
+        <button type="button" className="onboarding-close" onClick={onClose} aria-label="Cerrar"><X size={18} /></button>
+
+        {submitted ? (
+          <div className="checkout-pending">
+            <Check size={36} color="#1fa872" />
+            <h2>Tu pago está en revisión</h2>
+            <p>Verificaremos tu Yape a <strong>{YAPE_PHONE}</strong> y acreditaremos {credits} créditos a tu cuenta en cuanto se confirme. Puedes cerrar esta ventana.</p>
+            <Button type="button" onClick={onClose}>Entendido</Button>
+          </div>
+        ) : (
+          <>
+            <h2>Completar pago</h2>
+            <div className="checkout-summary">
+              <div><strong>{title}</strong><span>{credits} créditos</span></div>
+              <span className="checkout-price">US$ {priceUsd}</span>
+            </div>
+
+            <div className="checkout-methods" role="group" aria-label="Método de pago">
+              <button type="button" aria-pressed={method === 'yape'} onClick={() => setMethod('yape')}><Smartphone size={16} /> Yape</button>
+              <button type="button" aria-pressed={method === 'tarjeta'} onClick={() => setMethod('tarjeta')}><CreditCard size={16} /> Tarjeta</button>
+            </div>
+
+            {method === 'yape' ? (
+              <>
+                <div className="checkout-yape-number">
+                  <strong>{YAPE_PHONE}</strong>
+                  <p>Abre tu app Yape, envía US$ {priceUsd} (o su equivalente en soles) a este número y luego confirma abajo.</p>
+                </div>
+                <label className="checkout-field">
+                  Tu número de celular (con el que pagaste)
+                  <input type="tel" inputMode="numeric" placeholder="987654321" value={payerPhone} onChange={(event) => setPayerPhone(event.target.value)} maxLength={9} />
+                </label>
+                <Button type="button" className="auth-submit" disabled={submitting} onClick={submitYapeClaim}>
+                  {submitting ? <LoaderCircle className="spin" size={18} /> : 'Ya pagué, notificar al administrador'}
+                </Button>
+              </>
+            ) : (
+              <Button type="button" className="auth-submit" onClick={() => onCardCheckout(kind, planName)}>
+                Continuar con tarjeta <ArrowRight size={18} />
+              </Button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

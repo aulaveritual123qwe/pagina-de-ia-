@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { PLANS, TOPUP } from '@/lib/plans';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,13 +23,6 @@ async function providerSecret(name: string): Promise<string | undefined> {
 function json(body: Record<string, unknown>, status = 200) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 }
-
-const PLANS: Record<string, { priceUsd: number; credits: number }> = {
-  Inicial: { priceUsd: 19, credits: 1200 },
-  Creator: { priceUsd: 32, credits: 2500 },
-  Pro: { priceUsd: 59, credits: 5000 },
-};
-const TOPUP = { priceUsd: 9.9, credits: 700 };
 
 function formBody(fields: Record<string, string>): string {
   return Object.entries(fields)
