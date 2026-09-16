@@ -65,6 +65,7 @@ function json(body: Record<string, unknown>, status = 200) {
     if (/inappropriate|sensitive|policy|moderation|nsfw|violation/i.test(message)) body.error = 'No se pudo procesar este contenido. Revisa el texto y la referencia.';
     else if (/timed? ?out|timeout|aborted/i.test(message)) body.error = 'La conexión tardó demasiado. Vuelve a consultar tu generación pendiente.';
     else if (/internal error|reference =/i.test(message)) body.error = 'El servicio de generación tuvo un error temporal. Inténtalo de nuevo más tarde.';
+    else if (/audio_url|host not allowed|feature.disabled/i.test(message)) body.error = 'El audio con voz no está disponible en tu cuenta de A2E todavía. Contacta al soporte de A2E para habilitarlo, o genera el video sin texto hablado.';
     else if (/Qwen|QWEN|Higgsfield|Kling|Wan|DashScope|api.key|model.*not|invalid.*model/i.test(message)) body.error = 'El servicio de generación no pudo completar la solicitud. Contacta al administrador.';
   }
   return new Response(JSON.stringify(body), {
@@ -100,10 +101,20 @@ type A2EStartResponse = {
   taskId?: string;
   message?: string;
   error?: string;
+  // A2E's actual error shape uses these instead of message/error (e.g.
+  // {"code":100000,"msg":"audio_url host not allowed: ...","err_message":"..."})
+  msg?: string;
+  err_message?: string;
 };
 
+// tts_list returns a tree, not a flat array: gender -> language -> country ->
+// leaf voices ({ label: name, value: voice id }). Confirmed against a live
+// call — e.g. the "es" language node holds country groups like "MX"/"ES",
+// each holding the actual voice entries.
+type A2EVoiceNode = { label?: string; value?: string; children?: A2EVoiceNode[] };
+
 type A2ETtsListResponse = {
-  data?: Array<Record<string, unknown>> | Record<string, unknown>;
+  data?: A2EVoiceNode[];
   error?: string;
   message?: string;
 };
@@ -114,37 +125,65 @@ type A2ETtsResponse = {
   message?: string;
 };
 
+const SPANISH_VOICE_COUNTRY_PRIORITY = ['MX', 'ES', 'US', 'CO', 'AR'];
+
+// A2E's global video endpoint rejects audio_url values hosted on its own
+// China CDN ("host not allowed") — which is exactly where its TTS endpoint
+// publishes the file — and separately requires the URL to literally end in
+// .mp3 or .wav. Re-hosting through our own KV-backed /api/audio/[id].mp3
+// satisfies both.
+async function rehostAudio(sourceUrl: string, origin: string): Promise<string> {
+  const response = await fetch(sourceUrl, { signal: AbortSignal.timeout(30000) });
+  if (!response.ok) throw new Error('No se pudo descargar el audio generado.');
+  const mimeType = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg';
+  const bytes = await response.arrayBuffer();
+  const id = `${crypto.randomUUID()}.mp3`;
+  const kv = (env as unknown as { IMAGE_CACHE: KVNamespaceLike }).IMAGE_CACHE;
+  await kv.put(id, bytes, { expirationTtl: 3600, metadata: { mimeType } });
+  return `${origin}/api/audio/${id}`;
+}
+
+function findSpanishVoiceId(genderNodes: A2EVoiceNode[]): string | null {
+  let fallback: string | null = null;
+  for (const genderNode of genderNodes) {
+    for (const langNode of genderNode.children ?? []) {
+      if (langNode.value !== 'es') continue;
+      for (const countryNode of langNode.children ?? []) {
+        const voiceId = countryNode.children?.[0]?.value;
+        if (!voiceId) continue;
+        if (!fallback) fallback = voiceId;
+        if (SPANISH_VOICE_COUNTRY_PRIORITY.includes(countryNode.value ?? '')) return voiceId;
+      }
+    }
+  }
+  return fallback;
+}
+
 // The Wan Spicy video model has no built-in text-to-speech: it only accepts a
 // pre-rendered audio_url. Spoken text is synthesized separately via A2E's TTS
 // endpoint first, then that audio is attached to the video generation request.
-async function synthesizeVoice(apiToken: string, text: string): Promise<string> {
+async function synthesizeVoice(apiToken: string, text: string, origin: string): Promise<string> {
   const voiceListResponse = await fetch(`${A2E_API_BASE}/api/v1/anchor/tts_list`, {
     method: 'POST',
     signal: AbortSignal.timeout(20000),
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'User-Agent': A2E_USER_AGENT },
   });
   const voiceListPayload = (await voiceListResponse.json().catch(() => null)) as A2ETtsListResponse | null;
-  const voices = Array.isArray(voiceListPayload?.data) ? voiceListPayload.data : [];
-  const pickId = (voice: Record<string, unknown>) => voice._id ?? voice.id ?? voice.tts_id ?? voice.voice_id;
-  const spanishVoice = voices.find((voice) => {
-    const locale = String(voice.language ?? voice.lang ?? voice.locale ?? voice.country ?? '').toLowerCase();
-    return locale.includes('es') || locale.includes('span');
-  });
-  const ttsId = pickId(spanishVoice ?? voices[0] ?? {});
-  if (!ttsId) throw new Error('No se encontró una voz disponible para generar el audio.');
+  const ttsId = findSpanishVoiceId(voiceListPayload?.data ?? []);
+  if (!ttsId) throw new Error('No se encontró una voz en español disponible para generar el audio.');
 
   const ttsResponse = await fetch(`${A2E_API_BASE}/api/v1/video/send_tts`, {
     method: 'POST',
     signal: AbortSignal.timeout(30000),
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'User-Agent': A2E_USER_AGENT },
-    body: JSON.stringify({ msg: text, tts_id: ttsId, speechRate: 1, country: 'es', region: 'ES' }),
+    body: JSON.stringify({ msg: text, tts_id: ttsId, speechRate: 1 }),
   });
   const ttsPayload = (await ttsResponse.json().catch(() => null)) as A2ETtsResponse | null;
   const audioUrl = typeof ttsPayload?.data === 'string' ? ttsPayload.data : ttsPayload?.data?.url ?? ttsPayload?.data?.audio_url;
   if (!ttsResponse.ok || !audioUrl) {
     throw new Error(ttsPayload?.message ?? ttsPayload?.error ?? 'No se pudo generar el audio para el video.');
   }
-  return audioUrl;
+  return rehostAudio(audioUrl, origin);
 }
 
 type A2EVideoTaskResponse = {
@@ -235,8 +274,9 @@ export async function POST(request: Request) {
     if (!isImageToVideo) return json({ error: 'Contenido especial genera video desde una imagen de referencia.' }, 400);
     if (!a2eToken) return json({ error: 'La generación de video no está configurada. Contacta al administrador.' }, 501);
     try {
-      const imageUrl = await publishReferenceImage(referenceImage as string, new URL(request.url).origin);
-      const audioUrl = voiceText ? await synthesizeVoice(a2eToken, voiceText) : undefined;
+      const origin = new URL(request.url).origin;
+      const imageUrl = await publishReferenceImage(referenceImage as string, origin);
+      const audioUrl = voiceText ? await synthesizeVoice(a2eToken, voiceText, origin) : undefined;
       const submitResponse = await fetch(`${A2E_API_BASE}/api/v1/userWanSpicy/start`, {
         method: 'POST',
         signal: AbortSignal.timeout(35000),
@@ -254,7 +294,7 @@ export async function POST(request: Request) {
       const payload = (await submitResponse.json().catch(() => null)) as A2EStartResponse | null;
       const taskId = extractA2ETaskId(payload);
       if (!submitResponse.ok || !taskId) {
-        return json({ error: payload?.message ?? payload?.error ?? `El proveedor respondió con estado ${submitResponse.status}.` }, 502);
+        return json({ error: payload?.message ?? payload?.error ?? payload?.msg ?? payload?.err_message ?? `El proveedor respondió con estado ${submitResponse.status}.` }, 502);
       }
       return json({ taskId: `a2e:${taskId}` });
     } catch (error) {
