@@ -79,12 +79,15 @@ const KLING_SIZE_MAP: Record<string, string> = {
   '16:9': '1344x768',
 };
 
+// A2E's Qwen endpoint only accepts an exact enum of sizes (confirmed against
+// their docs — arbitrary W*H values like the ones used elsewhere fail with
+// a 422 "Validation Failed"), so each aspect ratio maps to its closest match.
 const A2E_QWEN_SIZE_MAP: Record<string, string> = {
   '1:1': '1024*1024',
-  '4:5': '928*1152',
-  '3:4': '768*1024',
-  '9:16': '768*1344',
-  '16:9': '1344*768',
+  '4:5': '864*1152',
+  '3:4': '864*1152',
+  '9:16': '720*1280',
+  '16:9': '1280*720',
 };
 
 const HIGGSFIELD_SUBMIT_URL = 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard';
