@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:workers';
+import { ADMIN_EMAIL, hashAdminPassword, isAdminAuthorized } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 
-const ADMIN_EMAIL = 'admin@creatorsacademy.pro';
 const CONFIG_KEY = 'admin:api-config';
 
 type ApiConfig = {
@@ -15,6 +15,7 @@ type ApiConfig = {
   STRIPE_WEBHOOK_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  ADMIN_PASSWORD_HASH?: string;
 };
 
 type Store = {
@@ -61,12 +62,15 @@ export async function GET() {
       GOOGLE_CLIENT_ID: mask(config?.GOOGLE_CLIENT_ID),
       GOOGLE_CLIENT_SECRET: mask(config?.GOOGLE_CLIENT_SECRET),
     },
+    hasPassword: Boolean(config?.ADMIN_PASSWORD_HASH),
   });
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => null)) as { adminEmail?: unknown; keys?: Record<string, unknown> } | null;
+  const body = (await request.json().catch(() => null)) as { adminEmail?: unknown; adminPassword?: unknown; newAdminPassword?: unknown; keys?: Record<string, unknown> } | null;
   if (sanitize(body?.adminEmail).toLowerCase() !== ADMIN_EMAIL) return json({ error: 'Solo el administrador puede vincular APIs.' }, 403);
+  if (!(await isAdminAuthorized(store(), body?.adminEmail, body?.adminPassword))) return json({ error: 'Contraseña de administrador incorrecta.' }, 403);
+
   const current = (await store().get(CONFIG_KEY, 'json').catch(() => null)) as ApiConfig | null;
   const next: ApiConfig = { ...(current ?? {}) };
   const allowed: Array<keyof ApiConfig> = ['HIGGSFIELD_API_KEY', 'KLING_API_KEY', 'KLING_ACCESS_KEY', 'KLING_SECRET_KEY', 'A2E_API_TOKEN', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'];
@@ -74,6 +78,17 @@ export async function POST(request: Request) {
     const value = sanitize(body?.keys?.[key]);
     if (value) next[key] = value;
   }
+
+  const newPassword = sanitize(body?.newAdminPassword);
+  if (newPassword) {
+    if (newPassword.length < 6) return json({ error: 'La contraseña debe tener al menos 6 caracteres.' }, 400);
+    next.ADMIN_PASSWORD_HASH = await hashAdminPassword(newPassword);
+  }
+
   await store().put(CONFIG_KEY, JSON.stringify(next));
-  return json({ ok: true, configured: { soul: Boolean(next.HIGGSFIELD_API_KEY), kling: Boolean(next.KLING_API_KEY || next.KLING_ACCESS_KEY), a2e: Boolean(next.A2E_API_TOKEN), stripe: Boolean(next.STRIPE_SECRET_KEY), google: Boolean(next.GOOGLE_CLIENT_ID) } });
+  return json({
+    ok: true,
+    configured: { soul: Boolean(next.HIGGSFIELD_API_KEY), kling: Boolean(next.KLING_API_KEY || next.KLING_ACCESS_KEY), a2e: Boolean(next.A2E_API_TOKEN), stripe: Boolean(next.STRIPE_SECRET_KEY), google: Boolean(next.GOOGLE_CLIENT_ID) },
+    hasPassword: Boolean(next.ADMIN_PASSWORD_HASH),
+  });
 }

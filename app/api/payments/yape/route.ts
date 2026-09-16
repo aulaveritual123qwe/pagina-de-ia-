@@ -1,9 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { PLANS, TOPUP } from '@/lib/plans';
+import { isAdminAuthorized } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
-
-const ADMIN_EMAIL = 'admin@creatorsacademy.pro';
 
 type YapeRequest = {
   id: string;
@@ -77,8 +76,8 @@ export async function POST(request: Request) {
 
 // Admin-only: list pending (and recent) Yape claims for manual review.
 export async function GET(request: Request) {
-  const adminEmail = new URL(request.url).searchParams.get('adminEmail')?.trim().toLowerCase();
-  if (adminEmail !== ADMIN_EMAIL) return json({ error: 'No autorizado.' }, 403);
+  const params = new URL(request.url).searchParams;
+  if (!(await isAdminAuthorized(store(), params.get('adminEmail'), params.get('adminPassword')))) return json({ error: 'No autorizado.' }, 403);
 
   const list = await store().list({ prefix: 'yape-request:' });
   const records = (

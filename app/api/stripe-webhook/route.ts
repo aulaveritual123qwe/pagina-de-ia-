@@ -73,11 +73,16 @@ export async function POST(request: Request) {
     const email = session?.metadata?.email ?? session?.client_reference_id;
     const creditsToAdd = Number(session?.metadata?.credits ?? 0);
     const planName = session?.metadata?.planName ?? '';
+    const kind = session?.metadata?.kind === 'plan' ? 'plan' : 'topup';
+    const amountUsd = Number(session?.metadata?.amountUsd ?? 0);
     if (email && email.includes('@') && creditsToAdd > 0) {
       const key = creditsKey(email);
       const current = (await store().get(key, 'json').catch(() => null)) as CreditsRecord | null;
       const nextPurchased = (current?.purchasedCredits ?? 0) + creditsToAdd;
       await store().put(key, JSON.stringify({ ...current, purchasedCredits: nextPurchased, plan: planName || current?.plan || 'Free' }));
+      await store().put(`payment-log:${Date.now()}-${crypto.randomUUID()}`, JSON.stringify({
+        email, method: 'stripe', kind, planName, credits: creditsToAdd, amountUsd, createdAt: Date.now(),
+      }));
     }
   }
 

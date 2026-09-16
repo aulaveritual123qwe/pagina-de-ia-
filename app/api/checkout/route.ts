@@ -72,6 +72,8 @@ export async function POST(request: Request) {
     'metadata[email]': email,
     'metadata[credits]': String(creditsAmount),
     'metadata[planName]': planName,
+    'metadata[kind]': kind,
+    'metadata[amountUsd]': String(kind === 'plan' ? PLANS[planName].priceUsd : TOPUP.priceUsd),
     'line_items[0][quantity]': '1',
     'line_items[0][price_data][currency]': 'usd',
     'line_items[0][price_data][product_data][name]': productName,

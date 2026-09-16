@@ -1,8 +1,7 @@
 import { env } from 'cloudflare:workers';
+import { isAdminAuthorized } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
-
-const ADMIN_EMAIL = 'admin@creatorsacademy.pro';
 
 type YapeRequest = {
   id: string;
@@ -36,9 +35,8 @@ function json(body: Record<string, unknown>, status = 200) {
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => null)) as { adminEmail?: unknown; requestId?: unknown; action?: unknown } | null;
-  const adminEmail = typeof body?.adminEmail === 'string' ? body.adminEmail.trim().toLowerCase() : '';
-  if (adminEmail !== ADMIN_EMAIL) return json({ error: 'No autorizado.' }, 403);
+  const body = (await request.json().catch(() => null)) as { adminEmail?: unknown; adminPassword?: unknown; requestId?: unknown; action?: unknown } | null;
+  if (!(await isAdminAuthorized(store(), body?.adminEmail, body?.adminPassword))) return json({ error: 'No autorizado.' }, 403);
 
   const requestId = typeof body?.requestId === 'string' ? body.requestId : '';
   const action = body?.action === 'approve' ? 'approve' : body?.action === 'reject' ? 'reject' : null;
@@ -54,6 +52,16 @@ export async function POST(request: Request) {
     const current = (await store().get(balanceKey, 'json').catch(() => null)) as CreditsRecord | null;
     const nextPurchased = (current?.purchasedCredits ?? 0) + record.credits;
     await store().put(balanceKey, JSON.stringify({ ...current, purchasedCredits: nextPurchased, plan: record.planName || current?.plan || 'Free' }));
+    await store().put(`payment-log:${Date.now()}-${crypto.randomUUID()}`, JSON.stringify({
+      email: record.email,
+      method: 'yape',
+      kind: record.kind,
+      planName: record.planName,
+      credits: record.credits,
+      amountUsd: record.priceUsd,
+      payerPhone: record.payerPhone,
+      createdAt: Date.now(),
+    }));
   }
 
   await store().put(key, JSON.stringify({ ...record, status: action === 'approve' ? 'approved' : 'rejected' }));
