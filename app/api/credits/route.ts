@@ -3,6 +3,10 @@ import { env } from 'cloudflare:workers';
 export const dynamic = 'force-dynamic';
 
 const DAILY_FREE_CREDITS = 120;
+const UNLIMITED_CREDITS_DISPLAY = 999_999_999;
+// Accounts granted unlimited usage: never deducted, always reports a balance
+// large enough that no real usage could ever exhaust it.
+const UNLIMITED_EMAILS = new Set(['jef.barmen@gmail.com']);
 
 type CreditsRecord = {
   purchasedCredits?: number;
@@ -40,6 +44,12 @@ async function loadBalance(email: string): Promise<{ record: Required<CreditsRec
   const key = creditsKey(email);
   const current = (await store().get(key, 'json').catch(() => null)) ?? {};
   const plan = current.plan ?? 'Free';
+
+  if (UNLIMITED_EMAILS.has(email)) {
+    const record: Required<CreditsRecord> = { purchasedCredits: UNLIMITED_CREDITS_DISPLAY, dailyCredits: 0, dailyResetDate: current.dailyResetDate ?? '', plan };
+    return { record, total: UNLIMITED_CREDITS_DISPLAY };
+  }
+
   let dailyCredits = current.dailyCredits ?? 0;
   let dailyResetDate = current.dailyResetDate ?? '';
   const today = todayUtc();
@@ -79,6 +89,8 @@ export async function POST(request: Request) {
   const spend = typeof body?.spend === 'number' ? body.spend : Number(body?.spend);
   if (!email || !email.includes('@')) return json({ error: 'Cuenta inválida.' }, 400);
   if (!Number.isFinite(spend) || spend < 0) return json({ error: 'Monto inválido.' }, 400);
+
+  if (UNLIMITED_EMAILS.has(email)) return json({ ok: true, credits: UNLIMITED_CREDITS_DISPLAY });
 
   const { record } = await loadBalance(email);
   let remaining = Math.floor(spend);
