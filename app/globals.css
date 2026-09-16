@@ -1544,8 +1544,10 @@ button { font-weight: 500; }
 .checkout-methods button { flex: 1; min-height: 44px; border-radius: 10px; border: 1px solid #e4e1ee; background: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .checkout-methods button[aria-pressed="true"] { border-color: #6621d7; color: #6621d7; background: #f4effd; }
 .checkout-yape-number { text-align: center; padding: 16px; margin-bottom: 16px; border-radius: 12px; background: #f4effd; }
+.checkout-yape-qr { width: 140px; height: 140px; margin: 0 auto 10px; border-radius: 10px; display: block; object-fit: cover; }
 .checkout-yape-number strong { font-size: 24px; letter-spacing: 1px; color: #6621d7; }
-.checkout-yape-number p { margin: 4px 0 0; font-size: 12px; color: #7b8094; }
+.checkout-yape-holder { display: block; font-size: 13px; font-weight: 600; color: #4a4e5c; margin-top: 2px; }
+.checkout-yape-number p { margin: 8px 0 0; font-size: 12px; color: #7b8094; }
 .checkout-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; font-size: 13px; font-weight: 600; }
 .checkout-field input { min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #e4e1ee; font-size: 14px; font-weight: 400; }
 .checkout-pending { text-align: center; padding: 20px 4px; }

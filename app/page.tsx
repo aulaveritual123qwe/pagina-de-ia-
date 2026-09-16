@@ -2181,8 +2181,10 @@ function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCard
             {method === 'yape' ? (
               <>
                 <div className="checkout-yape-number">
+                  <img src="/assets/yape-qr.jpeg" alt="Código QR de Yape" className="checkout-yape-qr" />
                   <strong>{YAPE_PHONE}</strong>
-                  <p>Abre tu app Yape, envía US$ {priceUsd} (o su equivalente en soles) a este número y luego confirma abajo.</p>
+                  <span className="checkout-yape-holder">César Balarezo</span>
+                  <p>Escanea el QR o yapea a este número, envía US$ {priceUsd} (o su equivalente en soles) y luego confirma abajo.</p>
                 </div>
                 <label className="checkout-field">
                   Tu número de celular (con el que pagaste)
