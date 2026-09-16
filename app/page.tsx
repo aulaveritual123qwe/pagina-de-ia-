@@ -162,6 +162,7 @@ export default function HomePage() {
   const [specialReferenceImage, setSpecialReferenceImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [specialIsGenerating, setSpecialIsGenerating] = useState(false);
   const [credits, setCredits] = useState(0);
+  const creditsWatchRef = useRef({ email: accountEmail, credits });
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState(media);
   const [resultSource, setResultSource] = useState<'demo' | 'live'>('demo');
@@ -187,6 +188,26 @@ export default function HomePage() {
     [view],
   );
 
+  // The server is authoritative for the balance shown here: it applies the
+  // Free plan's daily 120-credit reset and reflects Stripe/Yape purchases.
+  // The localStorage value is only a same-tab-load placeholder to avoid a
+  // flash of "0 créditos" while this fetch is in flight.
+  async function syncCreditsFromServer(email: string) {
+    try {
+      const response = await fetch(`/api/credits?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
+      const data = (await response.json().catch(() => null)) as { credits?: number; plan?: string } | null;
+      if (!response.ok || !data) return;
+      if (typeof data.credits === 'number') {
+        setCredits(data.credits);
+        window.localStorage.setItem(creditsKey(email), String(data.credits));
+        // Prevent the spend-watcher from mistaking this server correction
+        // (e.g. the daily free-credit reset) for a client-side spend.
+        creditsWatchRef.current = { email, credits: data.credits };
+      }
+      if (data.plan) { setPlan(data.plan); window.localStorage.setItem(userPlanKey(email), data.plan); }
+    } catch { /* keep the cached local value on network failure */ }
+  }
+
   useEffect(() => {
     (async () => {
       const users = loadUsers();
@@ -200,6 +221,7 @@ export default function HomePage() {
         setPlan(window.localStorage.getItem(userPlanKey(savedEmail)) ?? 'Free');
         setCredits(Number(window.localStorage.getItem(creditsKey(savedEmail))) || 0);
         setAgeConfirmed(window.localStorage.getItem(ageVerifiedKey(savedEmail)) === 'true');
+        void syncCreditsFromServer(savedEmail);
         try {
           const savedCharacters = JSON.parse(window.localStorage.getItem(charactersKey(savedEmail)) ?? '[]');
           if (Array.isArray(savedCharacters)) setCharacters(savedCharacters);
@@ -220,6 +242,7 @@ export default function HomePage() {
     setPlan(window.localStorage.getItem(userPlanKey(email)) ?? 'Free');
     setCredits(Number(window.localStorage.getItem(creditsKey(email))) || 0);
     setAgeConfirmed(window.localStorage.getItem(ageVerifiedKey(email)) === 'true');
+    void syncCreditsFromServer(email);
     setView(openAdmin ? 'ajustes' : 'crear');
     notify(`Bienvenido de nuevo, ${nameFromEmail(email).split(' ')[0]}.`);
     try {
@@ -303,6 +326,23 @@ export default function HomePage() {
     if (accountEmail) window.localStorage.setItem(creditsKey(accountEmail), String(credits));
   }, [credits, accountEmail]);
 
+  // Every place in the app that spends credits just calls setCredits with a
+  // lower number — rather than hooking each of those call sites, this watches
+  // for the resulting decrease and reports the spent amount to the server so
+  // the daily allowance / purchased balance split stays accurate.
+  useEffect(() => {
+    const previous = creditsWatchRef.current;
+    if (previous.email === accountEmail && accountEmail && credits < previous.credits) {
+      const spent = previous.credits - credits;
+      fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: accountEmail, spend: spent }),
+      }).catch(() => undefined);
+    }
+    creditsWatchRef.current = { email: accountEmail, credits };
+  }, [credits, accountEmail]);
+
   // Stripe redirects back here after checkout; the webhook is the source of truth
   // for the new balance, so pull it from the server instead of guessing locally.
   useEffect(() => {
@@ -311,14 +351,7 @@ export default function HomePage() {
     if (!checkout) return;
     window.history.replaceState({}, '', window.location.pathname);
     if (checkout === 'success') {
-      fetch(`/api/credits?email=${encodeURIComponent(accountEmail)}`)
-        .then((response) => response.json())
-        .then((data: { credits?: number; plan?: string }) => {
-          if (typeof data.credits === 'number') setCredits(data.credits);
-          if (data.plan) setPlan(data.plan);
-          notify('¡Pago exitoso! Tus créditos se actualizaron.');
-        })
-        .catch(() => undefined);
+      void syncCreditsFromServer(accountEmail).then(() => notify('¡Pago exitoso! Tus créditos se actualizaron.'));
     } else if (checkout === 'cancel') {
       notify('Pago cancelado.');
     }
@@ -2106,6 +2139,9 @@ function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string
   return (
     <div className="view-stack">
       <PageHeading eyebrow="CRECE A TU RITMO" title="Planes y créditos" description="Elige un plan claro. Sin costos ocultos y con tus créditos siempre visibles." note="Más espacio para crear" />
+      {currentPlan === 'Free' && (
+        <section className="topup-banner"><div><Coins /><span><strong>Tu plan Free incluye 120 créditos gratis cada día</strong><small>Se renuevan automáticamente a la medianoche. No se acumulan de un día a otro.</small></span></div></section>
+      )}
       <div className="plans-grid">{plans.map((plan) => <article className={`plan-card ${plan.featured ? 'featured' : ''} ${currentPlan === plan.name ? 'current-plan' : ''}`} key={plan.name}>{plan.featured && <span className="popular">Más elegido</span>}<h2>{plan.name}</h2><p>Para creadores {plan.name === 'Inicial' ? 'que están empezando' : 'en crecimiento'}</p><div className="price"><span>US$</span><strong>{plan.price}</strong><small>/ mes</small></div><div className="plan-credits"><Coins size={20} /> <strong>{plan.credits}</strong> créditos al mes</div><ul><li><Check /> Generación de imágenes</li><li><Check /> Descargas en alta calidad</li><li><Check /> Biblioteca personal</li><li><Check /> Uso comercial</li></ul><Button variant={plan.featured ? 'default' : 'secondary'} type="button" onClick={() => onSelectPlan(plan.name)}>{currentPlan === plan.name ? 'Plan actual' : `Elegir ${plan.name}`}</Button></article>)}</div>
       <section className="topup-banner"><div><Coins /><span><strong>¿Solo necesitas más créditos?</strong><small>Recarga 700 créditos por US$9.90 sin cambiar de plan.</small></span></div><Button variant="secondary" type="button" onClick={onTopUp}>Recargar 700 créditos</Button></section>
     </div>

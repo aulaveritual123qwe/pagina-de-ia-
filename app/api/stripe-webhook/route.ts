@@ -19,7 +19,7 @@ async function providerSecret(name: string): Promise<string | undefined> {
   return typeof config?.[name] === 'string' ? config[name] : undefined;
 }
 
-type CreditsRecord = { credits?: number; plan?: string };
+type CreditsRecord = { purchasedCredits?: number; dailyCredits?: number; dailyResetDate?: string; plan?: string };
 
 type KVLike = ConfigKV & {
   put: (key: string, value: string) => Promise<void>;
@@ -76,8 +76,8 @@ export async function POST(request: Request) {
     if (email && email.includes('@') && creditsToAdd > 0) {
       const key = creditsKey(email);
       const current = (await store().get(key, 'json').catch(() => null)) as CreditsRecord | null;
-      const nextCredits = (current?.credits ?? 0) + creditsToAdd;
-      await store().put(key, JSON.stringify({ credits: nextCredits, plan: planName || current?.plan || 'Free' }));
+      const nextPurchased = (current?.purchasedCredits ?? 0) + creditsToAdd;
+      await store().put(key, JSON.stringify({ ...current, purchasedCredits: nextPurchased, plan: planName || current?.plan || 'Free' }));
     }
   }
 

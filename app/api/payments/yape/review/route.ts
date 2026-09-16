@@ -16,7 +16,7 @@ type YapeRequest = {
   createdAt: number;
 };
 
-type CreditsRecord = { credits?: number; plan?: string };
+type CreditsRecord = { purchasedCredits?: number; dailyCredits?: number; dailyResetDate?: string; plan?: string };
 
 type KVLike = {
   get: (key: string, type?: 'json') => Promise<unknown>;
@@ -52,8 +52,8 @@ export async function POST(request: Request) {
   if (action === 'approve') {
     const balanceKey = creditsKey(record.email);
     const current = (await store().get(balanceKey, 'json').catch(() => null)) as CreditsRecord | null;
-    const nextCredits = (current?.credits ?? 0) + record.credits;
-    await store().put(balanceKey, JSON.stringify({ credits: nextCredits, plan: record.planName || current?.plan || 'Free' }));
+    const nextPurchased = (current?.purchasedCredits ?? 0) + record.credits;
+    await store().put(balanceKey, JSON.stringify({ ...current, purchasedCredits: nextPurchased, plan: record.planName || current?.plan || 'Free' }));
   }
 
   await store().put(key, JSON.stringify({ ...record, status: action === 'approve' ? 'approved' : 'rejected' }));
