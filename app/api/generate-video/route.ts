@@ -202,14 +202,6 @@ export async function POST(request: Request) {
     return json({ error: 'El prompt debe tener entre 3 y 2000 caracteres.' }, 400);
   }
 
-  const rawDuration = typeof body?.duration === 'number' ? body.duration : Number(body?.duration);
-  const duration = body?.duration === undefined ? 5 : rawDuration;
-  const provider = body?.provider === 'a2e' ? 'a2e' : 'kling';
-  const allowedDurations = provider === 'a2e' ? [5, 10] : [5, 10, 12];
-  if (!allowedDurations.includes(duration)) {
-    return json({ error: provider === 'a2e' ? 'Elige una duración de 5 o 10 segundos.' : 'Elige una duración de 5, 10 o 12 segundos. El máximo es 12 segundos.' }, 400);
-  }
-
   const isImageToVideo = body?.mode === 'image' || body?.model === 'wan-i2v';
   const referenceImage = typeof body?.referenceImage === 'string' && body.referenceImage.length > 0 ? body.referenceImage : null;
   if (isImageToVideo && !referenceImage) {
@@ -218,6 +210,24 @@ export async function POST(request: Request) {
   const ratio = body?.aspectRatio === undefined ? '9:16' : WAN_RATIO_MAP[body.aspectRatio as string];
   if (!isImageToVideo && !ratio) {
     return json({ error: 'Elige un formato válido.' }, 400);
+  }
+
+  // No provider can lip-sync speech from text alone — there is no face to
+  // animate without a reference image, so a spoken line only makes sense
+  // when animating one. When that's the case, route through A2E's
+  // TTS+lip-sync pipeline even if Kling was requested, since Kling's video
+  // models don't produce audio at all.
+  if (voiceText && !isImageToVideo) {
+    return json({ error: 'El texto hablado solo funciona en modo "Imagen a video": sube una foto de referencia para sincronizar los labios con el audio.' }, 400);
+  }
+  const requestedProvider = body?.provider === 'a2e' ? 'a2e' : 'kling';
+  const provider = requestedProvider === 'kling' && isImageToVideo && voiceText ? 'a2e' : requestedProvider;
+
+  const rawDuration = typeof body?.duration === 'number' ? body.duration : Number(body?.duration);
+  const duration = body?.duration === undefined ? 5 : rawDuration;
+  const allowedDurations = provider === 'a2e' ? [5, 10] : [5, 10, 12];
+  if (!allowedDurations.includes(duration)) {
+    return json({ error: provider === 'a2e' ? 'Elige una duración de 5 o 10 segundos.' : 'Elige una duración de 5, 10 o 12 segundos. El máximo es 12 segundos.' }, 400);
   }
 
   const a2eToken = await providerSecret('A2E_API_TOKEN');

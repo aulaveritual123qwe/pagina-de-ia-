@@ -1905,12 +1905,21 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false, pro
   const busyRef = useRef(false);
   const cancelRef = useRef(false);
   const isImageMode = videoMode === 'Imagen a video';
-  const durationOptions = VIDEO_DURATION_OPTIONS_BY_PROVIDER[provider];
+  // Spoken audio routes through A2E even in the Kling ("Generar Video") view,
+  // which only supports 5 or 10 second clips — match that here so the picked
+  // duration doesn't get rejected server-side once the text is added.
+  const usesA2EForAudio = provider === 'kling' && isImageMode && Boolean(voiceScript.trim());
+  const durationOptions = VIDEO_DURATION_OPTIONS_BY_PROVIDER[usesA2EForAudio ? 'a2e' : provider];
 
   useEffect(() => { cancelRef.current = false; return () => { cancelRef.current = true; }; }, []);
   useEffect(() => {
     if (!durationOptions.includes(duration)) setDuration(durationOptions[0]);
   }, [duration, durationOptions]);
+  // Spoken audio only works when animating a reference image (no provider can
+  // lip-sync speech from text alone), so drop any stale text when switching away.
+  useEffect(() => {
+    if (!isImageMode) setVoiceScript('');
+  }, [isImageMode]);
 
   async function pollVideoTask(taskId: string): Promise<string> {
     for (let attempt = 0; attempt < VIDEO_MAX_POLL_ATTEMPTS; attempt += 1) {
@@ -2042,12 +2051,16 @@ function VideoView({ credits, onSpendCredits, onNotify, hideHeading = false, pro
             <Textarea value={videoPrompt} onChange={(event) => setVideoPrompt(event.target.value)} minLength={3} maxLength={2000} aria-describedby="video-prompt-help" />
           </label>
           <div className="video-prompt-help" id="video-prompt-help"><span>Incluye el lugar, la luz y la acción.</span><span>{videoPrompt.length}/2000</span></div>
-          <label className="video-prompt-label">Texto hablado (opcional)
-            <Textarea value={voiceScript} onChange={(event) => setVoiceScript(event.target.value)} maxLength={280} aria-describedby="video-voice-help" />
-          </label>
-          <div className="video-prompt-help" id="video-voice-help"><span>Escribe exactamente lo que debe decir. La IA intentará generar voz natural y labios sincronizados.</span><span>{voiceScript.length}/280</span></div>
+          {isImageMode && (
+            <>
+              <label className="video-prompt-label">Texto hablado (opcional)
+                <Textarea value={voiceScript} onChange={(event) => setVoiceScript(event.target.value)} maxLength={280} aria-describedby="video-voice-help" />
+              </label>
+              <div className="video-prompt-help" id="video-voice-help"><span>Escribe exactamente lo que debe decir. Generamos audio real y sincronizamos los labios con la imagen.</span><span>{voiceScript.length}/280</span></div>
+            </>
+          )}
           <div className="settings-grid">
-            <SelectField label={`Duración · máximo ${provider === 'a2e' ? '10' : '12'} segundos`} value={duration} onChange={setDuration} options={durationOptions} />
+            <SelectField label={`Duración · máximo ${provider === 'a2e' || usesA2EForAudio ? '10' : '12'} segundos`} value={duration} onChange={setDuration} options={durationOptions} />
             {isImageMode ? <p>Formato del video: se conserva el formato de la imagen de referencia.</p> : <SelectField label="Formato" value={ratio} onChange={setRatio} options={['9:16', '1:1', '16:9']} />}
           </div>
           </fieldset>
