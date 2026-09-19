@@ -32,14 +32,15 @@ type PaymentRecord = {
 
 type ApiConfig = {
   configured: {
-    soul: boolean;
+    magnific: boolean;
     kling: boolean;
     a2e: boolean;
     stripe: boolean;
     google: boolean;
   };
   masked: {
-    HIGGSFIELD_API_KEY: string | null;
+    MAGNIFIC_API_KEY: string | null;
+    MAGNIFIC_WEBHOOK_SECRET: string | null;
     KLING_API_KEY: string | null;
     KLING_ACCESS_KEY: string | null;
     KLING_SECRET_KEY: string | null;
@@ -65,7 +66,8 @@ export default function AdminPage() {
   const [showKeys, setShowKeys] = useState(false);
 
   const [keys, setKeys] = useState({
-    HIGGSFIELD_API_KEY: '',
+    MAGNIFIC_API_KEY: '',
+    MAGNIFIC_WEBHOOK_SECRET: '',
     KLING_API_KEY: '',
     KLING_ACCESS_KEY: '',
     KLING_SECRET_KEY: '',
@@ -227,7 +229,8 @@ export default function AdminPage() {
       if (res.ok) {
         setMessage('✅ Guardado exitosamente');
         setKeys({
-          HIGGSFIELD_API_KEY: '',
+          MAGNIFIC_API_KEY: '',
+          MAGNIFIC_WEBHOOK_SECRET: '',
           KLING_API_KEY: '',
           KLING_ACCESS_KEY: '',
           KLING_SECRET_KEY: '',
@@ -317,11 +320,11 @@ export default function AdminPage() {
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">📊 Estado de Servicios</h2>
           <div className="grid grid-cols-5 gap-4">
-            <div className={`p-4 rounded-lg ${config?.configured.soul ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
-              <div className="text-sm text-gray-400">Avatares e imágenes</div>
-              <div className="text-lg font-bold">{config?.configured.soul ? '✅ Activo' : '❌ Inactivo'}</div>
-              {config?.masked.HIGGSFIELD_API_KEY && (
-                <div className="text-xs text-gray-500 mt-1">{config.masked.HIGGSFIELD_API_KEY}</div>
+            <div className={`p-4 rounded-lg ${config?.configured.magnific ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
+              <div className="text-sm text-gray-400">Seedream 4.5</div>
+              <div className="text-lg font-bold">{config?.configured.magnific ? '✅ Activo' : '❌ Inactivo'}</div>
+              {config?.masked.MAGNIFIC_API_KEY && (
+                <div className="text-xs text-gray-500 mt-1">{config.masked.MAGNIFIC_API_KEY}</div>
               )}
             </div>
             <div className={`p-4 rounded-lg ${config?.configured.kling ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
@@ -520,7 +523,8 @@ export default function AdminPage() {
 
           <div className="space-y-3">
             {[
-              { key: 'HIGGSFIELD_API_KEY', label: '🎨 API Key de imágenes y avatares' },
+              { key: 'MAGNIFIC_API_KEY', label: '🎨 Magnific API Key (Seedream 4.5)' },
+              { key: 'MAGNIFIC_WEBHOOK_SECRET', label: '🔐 Magnific Webhook Signing Secret' },
               { key: 'KLING_API_KEY', label: '🎬 Kling API Key' },
               { key: 'KLING_ACCESS_KEY', label: '🎬 Kling Access Key' },
               { key: 'KLING_SECRET_KEY', label: '🔑 Kling Secret Key' },

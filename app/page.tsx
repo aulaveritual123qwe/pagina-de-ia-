@@ -103,7 +103,7 @@ function libraryKey(email: string) { return `creators-library:${email}`; }
 const LIBRARY_MAX_ITEMS = 300;
 function planIsPro(plan: string) { return plan !== 'Free'; }
 
-type Character = { id: string; name: string; referenceImage: string; resultImage: string; references?: string[]; soulId?: string; referenceId?: string; soulStatus?: string; description?: string; gallery?: string[] };
+type Character = { id: string; name: string; referenceImage: string; resultImage: string; references?: string[]; referenceStatus?: string; description?: string; gallery?: string[] };
 type UserRecord = { name: string; passwordHash: string };
 
 async function hashPassword(password: string): Promise<string> {
@@ -149,8 +149,8 @@ export default function HomePage() {
   const [style, setStyle] = useState('Realista');
   const [ratio, setRatio] = useState('3:4');
   const [quality, setQuality] = useState('Alta');
-  const [imageCount, setImageCount] = useState('4');
-  const model = 'higgsfield';
+  const [imageCount, setImageCount] = useState('1');
+  const model = 'magnific';
   const specialImageModel = 'qwen';
   // "Contenido" keeps its own prompt/settings/results so it never mixes
   // with "Crear Imagen" — they're two separate workspaces that happen to share UI.
@@ -521,11 +521,11 @@ export default function HomePage() {
 
   async function handleGenerate() {
     if (!prompt.trim() || isGenerating) return;
-    const amount = Number(imageCount);
-    if (credits < amount * IMAGE_CREDIT_COST) { notify('No tienes créditos suficientes.'); return; }
+    const amount = 1;
+    if (credits < IMAGE_CREDIT_COST) { notify('No tienes créditos suficientes.'); return; }
     const avatar = characters.find((character) => character.name === selectedAvatar);
-    const avatarReferenceId = avatar?.referenceId ?? avatar?.soulId;
-    if (avatar && !avatarReferenceId) { notify('Este avatar necesita guardar su identidad con 20 fotos en Creaciones.'); return; }
+    const avatarReferences = (avatar?.references ?? []).slice(0, 10);
+    if (avatar && !avatarReferences.length) { notify('Este avatar necesita guardar sus referencias en Creaciones.'); return; }
     setIsGenerating(true);
     try {
       const { images, source } = await generateImages({
@@ -534,10 +534,9 @@ export default function HomePage() {
         aspectRatio: ratio,
         quality,
         count: amount,
-        model: 'higgsfield',
-        referenceImage: avatarReferenceId ? undefined : avatar?.referenceImage ?? referenceImage?.dataUrl,
-        soulId: avatarReferenceId,
-        referenceId: avatarReferenceId,
+        model: 'magnific',
+        referenceImage: referenceImage?.dataUrl,
+        avatarReferences,
       });
       setResults(images);
       addToLibrary(images);
@@ -549,10 +548,10 @@ export default function HomePage() {
         });
       }
       setResultSource(source);
-      setCredits((current) => Math.max(0, current - images.length * IMAGE_CREDIT_COST));
+      setCredits((current) => Math.max(0, current - IMAGE_CREDIT_COST));
       notify(
         source === 'live'
-          ? `${images.length} imagen${images.length === 1 ? '' : 'es'} generada${images.length === 1 ? '' : 's'} con IA.`
+          ? 'Imagen generada con IA.'
           : `${images.length} imagen${images.length === 1 ? '' : 'es'} generada${images.length === 1 ? '' : 's'} en modo demostración.`,
       );
     } catch (error) {
@@ -1079,7 +1078,7 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string, openAdmin?:
 
 
       <section className="landing-proof" aria-label="Resumen de la plataforma">
-        <div><strong>20</strong><span>fotos para construir una identidad consistente</span></div>
+        <div><strong>10</strong><span>fotos para construir un avatar consistente</span></div>
         <div><strong>3</strong><span>avatares disponibles en modo Pro</span></div>
         <div><strong>4</strong><span>módulos: avatares, imágenes, video y biblioteca</span></div>
         <div><strong>1</strong><span>flujo simple desde idea hasta descarga</span></div>
@@ -1089,10 +1088,10 @@ function LoginView({ onLogin, onNotify }: { onLogin: (email: string, openAdmin?:
         <div className="landing-section-copy">
           <span className="eyebrow">CÓMO FUNCIONA</span>
           <h2>De tus fotos a contenido listo para publicar</h2>
-          <p>Primero guardas la identidad del avatar. Luego eliges el personaje, escribes una idea y la plataforma mantiene rostro, estilo y detalles en cada creación.</p>
+          <p>Primero guardas las referencias del avatar. Luego eliges el personaje, escribes una idea y la plataforma mantiene rostro, estilo y detalles en cada creación.</p>
         </div>
         <div className="landing-flow-grid">
-          {[{ icon: Upload, title: 'Sube 20 referencias', copy: 'Fotos de frente, perfil y cuerpo completo para crear una base sólida.' }, { icon: Users, title: 'Guarda tu avatar', copy: 'La plataforma prepara una identidad interna para reutilizarla.' }, { icon: WandSparkles, title: 'Escribe tu idea', copy: 'Describe escenario, luz, ropa, acción y estilo visual.' }, { icon: Download, title: 'Descarga el resultado', copy: 'Genera imágenes o videos y guárdalos en tu biblioteca.' }].map((item) => <article key={item.title}><span><item.icon size={20} /></span><h3>{item.title}</h3><p>{item.copy}</p></article>)}
+          {[{ icon: Upload, title: 'Sube 10 referencias', copy: 'Fotos de frente, perfil y cuerpo completo para crear una base sólida.' }, { icon: Users, title: 'Guarda tu avatar', copy: 'Las referencias quedan listas para reutilizarlas.' }, { icon: WandSparkles, title: 'Escribe tu idea', copy: 'Describe escenario, luz, ropa, acción y estilo visual.' }, { icon: Download, title: 'Descarga el resultado', copy: 'Genera imágenes o videos y guárdalos en tu biblioteca.' }].map((item) => <article key={item.title}><span><item.icon size={20} /></span><h3>{item.title}</h3><p>{item.copy}</p></article>)}
         </div>
       </section>
 
@@ -1209,6 +1208,9 @@ type CreateViewProps = {
   onNavigate: (view: View) => void;
   onNotify: (message: string) => void;
   selectedAvatar: string;
+  avatars?: Character[];
+  plan?: string;
+  onSelectAvatar?: (name: string) => void;
   resultSource: 'demo' | 'live';
   referenceImage: { name: string; dataUrl: string } | null;
   onReferenceImageChange: (value: { name: string; dataUrl: string } | null) => void;
@@ -1296,6 +1298,7 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImag
   const [currentIndex, setCurrentIndex] = useState(0);
   const [avatarDropdownOpen, setAvatarDropdownOpen] = useState(false);
   const referenceInput = useRef<HTMLInputElement>(null);
+  const fixedAvatarGeneration = props.model === 'magnific';
   const currentImage = props.results[currentIndex] ?? props.results[0] ?? media[0];
   const avatarImage = props.avatarImage ?? (props.selectedAvatar === 'Lua Beach' ? media[2] : props.selectedAvatar === 'Lua Studio' ? media[3] : media[1]);
 
@@ -1389,7 +1392,7 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImag
                 <img src={props.referenceImage.dataUrl} alt="Imagen de referencia" />
                 <div className="reference-preview-copy">
                   <strong>{props.referenceImage.name}</strong>
-                  <small>La IA editará esta imagen según tu prompt</small>
+                  <small>Se añadirá a esta generación</small>
                 </div>
                 <button
                   type="button"
@@ -1423,7 +1426,7 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImag
                   reader.onload = () => {
                     if (typeof reader.result === 'string') {
                       props.onReferenceImageChange({ name: file.name, dataUrl: reader.result });
-                      props.onNotify('Imagen de referencia añadida. Se usará para editar el resultado.');
+                      props.onNotify('Imagen de referencia añadida a esta generación.');
                     }
                   };
                   reader.readAsDataURL(file);
@@ -1439,9 +1442,9 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImag
             </div>
             <div className="settings-grid">
               <RatioField value={props.ratio} onChange={props.setRatio} />
-              <SegmentedField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} />
+              {!fixedAvatarGeneration && <SegmentedField label="Cantidad" value={props.imageCount} onChange={props.setImageCount} options={['1', '2', '4']} />}
             </div>
-            {props.referenceImage && <p className="reference-note">Usaremos tu referencia para conservar la apariencia del personaje.</p>}
+            {props.referenceImage && <p className="reference-note">Usaremos esta referencia adicional junto a las referencias guardadas del avatar.</p>}
           </Step>
 
           <div className="generation-summary">
@@ -1449,25 +1452,25 @@ function CreateView(props: CreateViewProps & { hideHeading?: boolean; avatarImag
               <span>Listo para generar</span>
               <small>
                 {props.referenceImage
-                  ? 'Editando tu imagen de referencia con IA'
+                  ? 'Generando con la referencia adicional y tu avatar'
                   : props.resultSource === 'live'
                     ? 'Crea una nueva imagen con tus ajustes'
                     : 'Elige tus ajustes y genera tu primera imagen'}
               </small>
             </div>
-            <span className="estimated-cost"><Coins size={16} /> {Number(props.imageCount) * IMAGE_CREDIT_COST} créditos</span>
+            <span className="estimated-cost"><Coins size={16} /> {fixedAvatarGeneration ? IMAGE_CREDIT_COST : Number(props.imageCount) * IMAGE_CREDIT_COST} créditos</span>
           </div>
 
           <Button
             className="generate-button"
             size="lg"
-            disabled={!props.prompt.trim() || props.isGenerating || props.credits < Number(props.imageCount) * IMAGE_CREDIT_COST}
+            disabled={!props.prompt.trim() || props.isGenerating || props.credits < (fixedAvatarGeneration ? IMAGE_CREDIT_COST : Number(props.imageCount) * IMAGE_CREDIT_COST)}
             onClick={props.onGenerate}
           >
             {props.isGenerating ? (
-              <><LoaderCircle className="spin" /> Creando tu colección...</>
+              <><LoaderCircle className="spin" /> {fixedAvatarGeneration ? 'Generando imagen...' : 'Creando tu colección...'}</>
             ) : (
-              <><WandSparkles /> Generar imágenes</>
+              <><WandSparkles /> {fixedAvatarGeneration ? 'Generar imagen' : 'Generar imágenes'}</>
             )}
           </Button>
         </section>
@@ -1599,13 +1602,13 @@ function CreacionesView({ credits, plan, characters, selectedAvatar, onSelectAva
 
   function addFiles(files: File[]) {
     if (!files.length) return;
-    if (references.length + files.length > 20) { setError('Puedes subir máximo 20 imágenes de referencia.'); return; }
+    if (references.length + files.length > 10) { setError('Puedes subir máximo 10 imágenes de referencia.'); return; }
     files.forEach((file) => {
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setError('Usa imágenes JPG, PNG o WebP.'); return; }
       if (file.size > MAX_REFERENCE_IMAGE_BYTES) { setError('Cada imagen debe pesar menos de 5 MB.'); return; }
       const reader = new FileReader();
       reader.onload = () => {
-        if (typeof reader.result === 'string') { setReferences((current) => [...current, { name: file.name, dataUrl: reader.result as string }].slice(0, 20)); setError(''); setSaved(null); }
+        if (typeof reader.result === 'string') { setReferences((current) => [...current, { name: file.name, dataUrl: reader.result as string }].slice(0, 10)); setError(''); setSaved(null); }
       };
       reader.readAsDataURL(file);
     });
@@ -1614,9 +1617,8 @@ function CreacionesView({ credits, plan, characters, selectedAvatar, onSelectAva
   async function createAvatar() {
     if (creating) return;
     if (selectedSlot === null) { setError('Elige un avatar primero.'); return; }
-    if (references.length !== 20) { setError('Sube exactamente 20 imágenes del mismo avatar para guardar su identidad.'); return; }
+    if (references.length !== 10) { setError('Sube exactamente 10 imágenes del mismo avatar para guardarlo.'); return; }
     if (!name.trim()) { setError('Ponle un nombre a tu avatar.'); return; }
-    if (credits < IMAGE_CREDIT_COST) { setError('No tienes créditos suficientes para preparar este avatar.'); return; }
     setCreating(true); setError('');
     try {
       const urls: string[] = [];
@@ -1626,35 +1628,20 @@ function CreacionesView({ credits, plan, characters, selectedAvatar, onSelectAva
         if (!upload.ok || !uploaded.url) throw new Error(uploaded.error ?? 'No se pudo subir una referencia.');
         urls.push(uploaded.url);
       }
-      const create = await fetch('/api/soul-character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), references: urls }) });
-      const created = await create.json() as { id?: string; soulId?: string; referenceId?: string; status?: string; error?: string };
-      const referenceId = created.referenceId ?? created.soulId ?? created.id;
-      if (!create.ok || !referenceId) throw new Error(created.error ?? 'No se pudo guardar la identidad del avatar.');
-      let finalStatus = created.status ?? 'PENDING';
-      let ready = finalStatus.toLowerCase() === 'completed';
-      for (let attempt = 0; attempt < 80 && !ready; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        const response = await fetch(`/api/soul-character?id=${encodeURIComponent(referenceId)}`);
-        const data = await response.json() as { status?: string; error?: string };
-        finalStatus = data.status ?? finalStatus;
-        if (!response.ok || finalStatus.toLowerCase() === 'failed') throw new Error(data.error ?? 'No se pudo preparar la identidad del avatar.');
-        ready = finalStatus.toLowerCase() === 'completed';
-      }
-      if (!ready) throw new Error('La identidad del avatar sigue preparándose. Inténtalo otra vez en unos minutos sin cambiar las fotos.');
-      const character: Character = { id: activeCharacter?.id ?? crypto.randomUUID(), name: name.trim(), description, referenceImage: urls[0], resultImage: primaryPreview, references: urls, soulId: referenceId, referenceId, soulStatus: 'COMPLETED', gallery: activeCharacter?.gallery ?? [] };
-      setSaved(character); onCreated(character); onSelectAvatar(character.name); onNotify(`Avatar "${character.name}" listo. Identidad completada.`); setSelectedSlot(null);
+      const character: Character = { id: activeCharacter?.id ?? crypto.randomUUID(), name: name.trim(), description, referenceImage: urls[0], resultImage: primaryPreview, references: urls, referenceStatus: 'READY', gallery: activeCharacter?.gallery ?? [] };
+      setSaved(character); onCreated(character); onSelectAvatar(character.name); onNotify(`Avatar "${character.name}" guardado y listo para crear imágenes.`); setSelectedSlot(null);
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo crear el avatar. Inténtalo nuevamente.'); }
     finally { setCreating(false); }
   }
 
   if (selectedSlot === null) {
-    return <div className="creaciones-view view-stack"><section className="creaciones-hero compact"><div><span className="eyebrow light">MIS AVATARES</span><h1>Mis Avatares</h1><p>Crea avatares consistentes con tu estilo. La versión gratuita permite 1 avatar. Con PRO puedes crear hasta 3 avatares.</p></div><span className="avatar-slot-count">{usedSlots}/3</span></section><section className="avatar-slot-board"><div className="avatar-slot-grid">{slots.map((slot) => <article className={`avatar-slot-card ${slot.character?.name === selectedAvatar ? 'is-active' : ''} ${slot.locked ? 'is-locked' : ''}`} key={slot.slot} onClick={() => openSlot(slot.slot, slot.locked)}><div className="avatar-slot-image"><img src={slot.image} alt={slot.name} /><span>{slot.slot === 0 ? 'Principal' : 'PRO'}</span>{slot.locked && <div className="slot-lock"><Lock size={24} /></div>}</div><label>Nombre del avatar<input value={slot.name} readOnly /></label><label>Descripción<textarea value={slot.description} readOnly /></label><div className="avatar-profile-meta"><span>Formato base: 3:4</span><span>Referencias: {slot.references}/20</span>{slot.character?.referenceId && <span>Identidad lista</span>}</div>{slot.locked ? <Button type="button" variant="secondary"><Crown size={16} /> Desbloquear con Pro</Button> : <Button type="button" variant={slot.character?.name === selectedAvatar ? 'default' : 'secondary'}>{slot.character ? 'Editar avatar' : 'Crear avatar'}</Button>}</article>)}</div><aside className="avatar-save-rail"><Button type="button" disabled><Check size={18} /> Guardar Avatares</Button><div className="avatar-status-card"><Check size={28} /><strong>Listo para guardar</strong><p>Completa hasta 3 avatares y guarda para usarlos en Crear Imagen.</p></div><div className="avatar-advice-card"><Sparkles size={26} /><strong>Consejos</strong><ul><li>Usa fotos de frente, perfil y cuerpo completo.</li><li>Incluye buena iluminación.</li><li>Muestra diferentes ángulos y expresiones.</li><li>No mezcles personas distintas.</li></ul></div></aside></section></div>;
+    return <div className="creaciones-view view-stack"><section className="creaciones-hero compact"><div><span className="eyebrow light">MIS AVATARES</span><h1>Mis Avatares</h1><p>Crea avatares consistentes con tu estilo. La versión gratuita permite 1 avatar. Con PRO puedes crear hasta 3 avatares.</p></div><span className="avatar-slot-count">{usedSlots}/3</span></section><section className="avatar-slot-board"><div className="avatar-slot-grid">{slots.map((slot) => <article className={`avatar-slot-card ${slot.character?.name === selectedAvatar ? 'is-active' : ''} ${slot.locked ? 'is-locked' : ''}`} key={slot.slot} onClick={() => openSlot(slot.slot, slot.locked)}><div className="avatar-slot-image"><img src={slot.image} alt={slot.name} /><span>{slot.slot === 0 ? 'Principal' : 'PRO'}</span>{slot.locked && <div className="slot-lock"><Lock size={24} /></div>}</div><label>Nombre del avatar<input value={slot.name} readOnly /></label><label>Descripción<textarea value={slot.description} readOnly /></label><div className="avatar-profile-meta"><span>Formato base: 3:4</span><span>Referencias: {slot.references}/10</span>{slot.character?.referenceStatus === 'READY' && <span>Avatar listo</span>}</div>{slot.locked ? <Button type="button" variant="secondary"><Crown size={16} /> Desbloquear con Pro</Button> : <Button type="button" variant={slot.character?.name === selectedAvatar ? 'default' : 'secondary'}>{slot.character ? 'Editar avatar' : 'Crear avatar'}</Button>}</article>)}</div><aside className="avatar-save-rail"><Button type="button" disabled><Check size={18} /> Guardar Avatares</Button><div className="avatar-status-card"><Check size={28} /><strong>Listo para guardar</strong><p>Completa hasta 3 avatares y guarda para usarlos en Crear Imagen.</p></div><div className="avatar-advice-card"><Sparkles size={26} /><strong>Consejos</strong><ul><li>Usa fotos de frente, perfil y cuerpo completo.</li><li>Incluye buena iluminación.</li><li>Muestra diferentes ángulos y expresiones.</li><li>No mezcles personas distintas.</li></ul></div></aside></section></div>;
   }
 
   return (
     <div className="creaciones-view view-stack">
-      <section className="creaciones-hero compact"><div><span className="eyebrow light">AVATAR {selectedSlot + 1}</span><h1>{activeCharacter ? 'Editar avatar' : 'Crear avatar'}</h1><p>Sube 20 imágenes de referencia y completa los datos de este avatar.</p></div><Button type="button" variant="secondary" onClick={() => setSelectedSlot(null)}>Volver a Mis Avatares</Button></section>
-      <section className="creaciones-grid"><article className="avatar-profile-card"><div className="avatar-profile-image"><img src={primaryPreview} alt="Vista previa del avatar" /></div><label>Nombre del avatar<input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} /></label><label>Descripción<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={600} /></label><div className="avatar-profile-meta"><span>Formato base: 3:4</span><span>Referencias: {references.length}/20</span></div></article><article className="reference-studio-card"><div className="reference-title-row"><div><h2>Imágenes de Referencia</h2><p>Sube 20 fotos desde diferentes ángulos. Frente, perfil y cuerpo completo dan mejores resultados.</p></div><span>{references.length}/20</span></div><div className="reference-mosaic">{Array.from({ length: 20 }).map((_, index) => { const image = references[index]; return image ? <button type="button" key={`${image.name}-${index}`} onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Quitar referencia ${index + 1}`}><img src={image.dataUrl} alt={`Referencia ${index + 1}`} /><span><X size={13} /></span></button> : <div key={`empty-${index}`} className="reference-empty"><ImageIcon size={20} /></div>; })}</div><button type="button" className="reference-dropzone" onClick={() => inputRef.current?.click()} disabled={references.length >= 20}><Upload size={28} /><strong>Subir más imágenes</strong><small>JPG, PNG o WebP · 20 imágenes · máximo 5 MB cada una</small></button><input ref={inputRef} className="visually-hidden" type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; addFiles(files); }} /></article><aside className="avatar-save-rail"><Button type="button" onClick={createAvatar} disabled={creating || references.length !== 20}>{creating ? <LoaderCircle className="spin" size={18} /> : <Check size={18} />} {creating ? 'Creando identidad' : 'Guardar avatar y crear identidad'}</Button><div className={`avatar-status-card ${saved ? 'is-saved' : ''}`}><Check size={28} /><strong>{saved ? 'Identidad completada' : 'Listo para crear identidad'}</strong><p>{saved ? `Identidad completada. Crear Imagen usará esta consistencia interna.` : 'Completa 20 referencias y pulsa guardar para crear la consistencia interna del avatar.'}</p></div><div className="avatar-advice-card"><Sparkles size={26} /><strong>Consejos</strong><ul><li>Incluye fotos de frente, perfil y cuerpo completo.</li><li>Usa buena iluminación.</li><li>Muestra diferentes ángulos y expresiones.</li><li>No mezcles personas distintas.</li></ul></div>{error && <p className="avatar-create-error">{error}</p>}</aside></section><section className="avatar-folder-section"><div className="section-title-row"><div><h2>Carpetas por avatar</h2><p>Cada avatar guarda aquí las imágenes que se generan con su identidad.</p></div></div><div className="avatar-folder-grid">{characters.length ? characters.map((character) => <article className={`avatar-folder-card ${character.name === selectedAvatar ? 'is-active' : ''}`} key={character.id}><img src={character.resultImage} alt={`Carpeta de ${character.name}`} /><div><strong>{character.name}</strong><small>{(character.gallery?.length ?? 0)} imágenes generadas</small></div></article>) : <p className="avatar-folder-empty">Aún no tienes carpetas. Crea un avatar para guardar su trabajo.</p>}</div></section><section className="avatar-examples-strip"><h2>Ejemplos de resultados con el mismo avatar</h2><div>{exampleImages.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`Ejemplo ${index + 1}`} />)}</div></section>
+      <section className="creaciones-hero compact"><div><span className="eyebrow light">AVATAR {selectedSlot + 1}</span><h1>{activeCharacter ? 'Editar avatar' : 'Crear avatar'}</h1><p>Guarda 10 imágenes de referencia para usar este avatar al crear imágenes.</p></div><Button type="button" variant="secondary" onClick={() => setSelectedSlot(null)}>Volver a Mis Avatares</Button></section>
+      <section className="creaciones-grid"><article className="avatar-profile-card"><div className="avatar-profile-image"><img src={primaryPreview} alt="Vista previa del avatar" /></div><label>Nombre del avatar<input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} /></label><label>Descripción<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={600} /></label><div className="avatar-profile-meta"><span>Formato base: 3:4</span><span>Referencias: {references.length}/10</span></div></article><article className="reference-studio-card"><div className="reference-title-row"><div><h2>Imágenes de referencia</h2><p>Sube 10 fotos desde diferentes ángulos. Frente, perfil y cuerpo completo dan mejores resultados.</p></div><span>{references.length}/10</span></div><div className="reference-mosaic">{Array.from({ length: 10 }).map((_, index) => { const image = references[index]; return image ? <button type="button" key={`${image.name}-${index}`} onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Quitar referencia ${index + 1}`}><img src={image.dataUrl} alt={`Referencia ${index + 1}`} /><span><X size={13} /></span></button> : <div key={`empty-${index}`} className="reference-empty"><ImageIcon size={20} /></div>; })}</div><button type="button" className="reference-dropzone" onClick={() => inputRef.current?.click()} disabled={references.length >= 10}><Upload size={28} /><strong>Subir más imágenes</strong><small>JPG, PNG o WebP · 10 imágenes · máximo 5 MB cada una</small></button><input ref={inputRef} className="visually-hidden" type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; addFiles(files); }} /></article><aside className="avatar-save-rail"><Button type="button" onClick={createAvatar} disabled={creating || references.length !== 10}>{creating ? <LoaderCircle className="spin" size={18} /> : <Check size={18} />} {creating ? 'Guardando referencias' : 'Guardar avatar'}</Button><div className={`avatar-status-card ${saved ? 'is-saved' : ''}`}><Check size={28} /><strong>{saved ? 'Avatar listo' : 'Listo para guardar'}</strong><p>{saved ? 'Tus referencias están listas para generar imágenes consistentes.' : 'Completa 10 referencias y guarda el avatar para usarlo en Crear Imagen.'}</p></div><div className="avatar-advice-card"><Sparkles size={26} /><strong>Consejos</strong><ul><li>Incluye fotos de frente, perfil y cuerpo completo.</li><li>Usa buena iluminación.</li><li>Muestra diferentes ángulos y expresiones.</li><li>No mezcles personas distintas.</li></ul></div>{error && <p className="avatar-create-error">{error}</p>}</aside></section><section className="avatar-folder-section"><div className="section-title-row"><div><h2>Carpetas por avatar</h2><p>Cada avatar guarda aquí las imágenes que se generan con sus referencias.</p></div></div><div className="avatar-folder-grid">{characters.length ? characters.map((character) => <article className={`avatar-folder-card ${character.name === selectedAvatar ? 'is-active' : ''}`} key={character.id}><img src={character.resultImage} alt={`Carpeta de ${character.name}`} /><div><strong>{character.name}</strong><small>{(character.gallery?.length ?? 0)} imágenes generadas</small></div></article>) : <p className="avatar-folder-empty">Aún no tienes carpetas. Crea un avatar para guardar su trabajo.</p>}</div></section><section className="avatar-examples-strip"><h2>Ejemplos de resultados con el mismo avatar</h2><div>{exampleImages.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`Ejemplo ${index + 1}`} />)}</div></section>
     </div>
   );
 }
@@ -1669,7 +1656,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [reference, setReference] = useState<{ name: string; dataUrl: string } | null>(null);
   const [references, setReferences] = useState<Array<{ name: string; dataUrl: string }>>([]);
-  const [soulId, setSoulId] = useState('');
+  const [avatarId, setAvatarId] = useState('');
   const [savedReferences, setSavedReferences] = useState<string[]>([]);
   const [description, setDescription] = useState('');
   const [avatarRatio, setAvatarRatio] = useState('3:4');
@@ -1692,7 +1679,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
       if (typeof reader.result === 'string') {
         setReference({ name: file.name, dataUrl: reader.result });
         const dataUrl = reader.result;
-        setReferences((current) => [...current, { name: file.name, dataUrl }].slice(0, 20));
+        setReferences((current) => [...current, { name: file.name, dataUrl }].slice(0, 10));
         setError('');
       }
     };
@@ -1700,7 +1687,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
   }
 
   async function handleGenerate() {
-    if (!reference || references.length < 5 || generating) return;
+    if (!reference || references.length !== 10 || generating) return;
     const cost = IMAGE_CREDIT_COST;
     if (credits < cost) {
       setError('No tienes créditos suficientes para crear tu personaje.');
@@ -1709,8 +1696,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
     setGenerating(true);
     setError('');
     try {
-      let identity = soulId;
-      if (!identity) {
+      if (!avatarId) {
         const urls: string[] = [];
         for (const image of references) {
           const upload = await fetch('/api/upload-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: image.dataUrl, purpose: 'avatar' }) });
@@ -1719,31 +1705,16 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
           urls.push(uploaded.url);
         }
         setSavedReferences(urls);
-        const create = await fetch('/api/soul-character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, references: urls }) });
-        const created = await create.json() as { id?: string; soulId?: string; referenceId?: string; status?: string; error?: string };
-        const createdReferenceId = created.referenceId ?? created.soulId ?? created.id;
-        if (!create.ok || !createdReferenceId) throw new Error(created.error ?? 'No se pudo guardar la identidad del avatar.');
-        identity = createdReferenceId;
-        setSoulId(identity);
+        setAvatarId(crypto.randomUUID());
       }
-      let ready = false;
-      for (let attempt = 0; attempt < 120; attempt++) {
-        const response = await fetch(`/api/soul-character?id=${encodeURIComponent(identity)}`);
-        const data = await response.json() as { status?: string; error?: string };
-        if (!response.ok || data.status === 'failed') throw new Error(data.error ?? 'No se pudo preparar el avatar.');
-        if ((data.status ?? '').toLowerCase() === 'completed') { ready = true; break; }
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-      }
-      if (!ready) throw new Error('Seguimos preparando tu avatar. Pulsa Reintentar para consultar la misma identidad.');
       const generated = await generateImages({
         prompt: `${description}. ${prompt}`,
         style: 'Realista',
         aspectRatio: avatarRatio,
         quality: 'Alta',
         count: 1,
-        model: 'higgsfield',
-        soulId: identity,
-        referenceId: identity,
+        model: 'magnific',
+        avatarReferences: savedReferences.length ? savedReferences : references.map((item) => item.dataUrl),
       });
       onSpendCredits(cost, '');
       setResultImage(generated.images[0]);
@@ -1756,7 +1727,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
 
   function handleSave() {
     if (!reference || !resultImage) return;
-    onCreated({ id: crypto.randomUUID(), name: name.trim() || 'Mi personaje', referenceImage: savedReferences[0], resultImage, soulId, referenceId: soulId, soulStatus: 'COMPLETED', description, references: savedReferences });
+    onCreated({ id: avatarId || crypto.randomUUID(), name: name.trim() || 'Mi personaje', referenceImage: savedReferences[0] ?? reference.dataUrl, resultImage, referenceStatus: 'READY', description, references: savedReferences.length ? savedReferences : references.map((item) => item.dataUrl) });
   }
 
   return (
@@ -1771,22 +1742,22 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
           <div className="onboarding-step">
             <span className="onboarding-eyebrow">PASO 1</span>
             <h2>Crea tu avatar desde cero</h2>
-            <p>Sube 20 fotos del mismo personaje: rostro de frente, perfiles y cuerpo. Usaremos estas referencias para preparar su identidad.</p>
+            <p>Sube 10 fotos del mismo personaje: rostro de frente, perfiles y cuerpo. Usaremos estas referencias para conservar su apariencia.</p>
             <div className="avatar-reference-grid">{references.map((image, index) => <div key={`${image.name}-${index}`}><img src={image.dataUrl} alt={`Referencia ${index + 1}`} /><button type="button" aria-label={`Quitar referencia ${index + 1}`} onClick={() => setReferences((current) => current.filter((_, i) => i !== index))}><X size={14} /></button></div>)}</div>
-            <p>{references.length}/20 referencias</p>
-            <Button type="button" variant="secondary" disabled={references.length >= 20} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> Añadir referencias</Button>
+            <p>{references.length}/10 referencias</p>
+            <Button type="button" variant="secondary" disabled={references.length >= 10} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> Añadir referencias</Button>
             <input
               ref={fileInputRef}
               className="visually-hidden"
               type="file"
               multiple
               accept="image/*"
-              onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; if (files.length + references.length > 20) { setError('Debes subir máximo 20 referencias.'); return; } files.forEach(handleFile); }}
+              onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; if (files.length + references.length > 10) { setError('Debes subir máximo 10 referencias.'); return; } files.forEach(handleFile); }}
             />
             {error && <p className="onboarding-error">{error}</p>}
             <div className="onboarding-actions">
               <button type="button" className="link-button" onClick={onSkip}>Omitir por ahora</button>
-              <Button type="button" disabled={references.length < 20} onClick={() => setStep(3)}>Continuar <ArrowRight size={16} /></Button>
+              <Button type="button" disabled={references.length < 10} onClick={() => setStep(3)}>Continuar <ArrowRight size={16} /></Button>
             </div>
           </div>
         )}
@@ -1818,7 +1789,7 @@ function CharacterOnboarding({ credits, onSpendCredits, onCreated, onSkip }: {
           <div className="onboarding-step">
             <span className="onboarding-eyebrow">PASO 3</span>
             <h2>{resultImage ? 'Tu personaje está listo' : 'Generando tu primera imagen'}</h2>
-            {!resultImage && !error && <p>Manteniendo la misma identidad en una nueva escena. Puede tardar un momento...</p>}
+            {!resultImage && !error && <p>Preparando una nueva imagen con las referencias de tu avatar. Puede tardar un momento...</p>}
             <div className="onboarding-result">
               {generating && <LoaderCircle className="spin" size={32} />}
               {resultImage && <img src={resultImage} alt="Personaje generado" />}
@@ -1862,7 +1833,7 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
           <span className="avatar-upload-icon"><Upload size={22} /></span>
           <span className="avatar-upload-copy">
             <strong>Sube 20 fotos de tu personaje</strong>
-            <small>Necesitas 20 imágenes de referencia para crear una identidad consistente.</small>
+            <small>Necesitas 10 imágenes de referencia para crear un avatar consistente.</small>
           </span>
           <span className="avatar-upload-cta">Subir fotos <ArrowRight size={16} /></span>
         </button>
@@ -2312,8 +2283,8 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
   const [profile, setProfile] = useState({ name: profileName, email: accountEmail, language: 'Español', description: '' });
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPlan, setAdminPlan] = useState('Pro');
-  const [apiKeys, setApiKeys] = useState({ HIGGSFIELD_API_KEY: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' });
-  const [apiStatus, setApiStatus] = useState({ soul: false, kling: false, a2e: false, stripe: false, google: false });
+  const [apiKeys, setApiKeys] = useState({ MAGNIFIC_API_KEY: '', MAGNIFIC_WEBHOOK_SECRET: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' });
+  const [apiStatus, setApiStatus] = useState({ magnific: false, kling: false, a2e: false, stripe: false, google: false });
 
   useEffect(() => {
     const saved = window.localStorage.getItem('creator-profile');
@@ -2329,7 +2300,7 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
     if (!isAdmin) return;
     fetch('/api/admin-apis', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((data: { configured?: { soul?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean } }) => setApiStatus({ soul: Boolean(data.configured?.soul), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google) }))
+      .then((data: { configured?: { magnific?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean } }) => setApiStatus({ magnific: Boolean(data.configured?.magnific), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google) }))
       .catch(() => undefined);
   }, [isAdmin]);
 
@@ -2339,10 +2310,10 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ adminEmail: accountEmail, keys: apiKeys }),
     });
-    const data = await response.json() as { configured?: { soul?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean }; error?: string };
+    const data = await response.json() as { configured?: { magnific?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean }; error?: string };
     if (!response.ok) { onNotify(data.error ?? 'No se pudieron guardar las APIs.'); return; }
-    setApiStatus({ soul: Boolean(data.configured?.soul), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google) });
-    setApiKeys({ HIGGSFIELD_API_KEY: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' });
+    setApiStatus({ magnific: Boolean(data.configured?.magnific), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google) });
+    setApiKeys({ MAGNIFIC_API_KEY: '', MAGNIFIC_WEBHOOK_SECRET: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' });
     onNotify('APIs vinculadas correctamente.');
   }
 
@@ -2379,8 +2350,8 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
           {isAdmin && <div className="admin-access-card api-admin-card">
             <h2>APIs de generación</h2>
             <p>Vincula las claves que usará la plataforma para Crear Imagen, Generar Video y Contenido. Las claves se guardan en el servidor y no se muestran completas.</p>
-            <div className="api-status-row"><span className={apiStatus.soul ? 'ready' : ''}>Avatares e imágenes</span><span className={apiStatus.kling ? 'ready' : ''}>Kling video</span><span className={apiStatus.a2e ? 'ready' : ''}>A2E Contenido</span><span className={apiStatus.stripe ? 'ready' : ''}>Pagos (Stripe)</span><span className={apiStatus.google ? 'ready' : ''}>Login Google</span></div>
-            <label>API Key de imágenes y avatares<input type="password" value={apiKeys.HIGGSFIELD_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, HIGGSFIELD_API_KEY: event.target.value })} placeholder="Key para crear avatares e imágenes" /></label>
+            <div className="api-status-row"><span className={apiStatus.magnific ? 'ready' : ''}>Seedream 4.5</span><span className={apiStatus.kling ? 'ready' : ''}>Kling video</span><span className={apiStatus.a2e ? 'ready' : ''}>A2E Contenido</span><span className={apiStatus.stripe ? 'ready' : ''}>Pagos (Stripe)</span><span className={apiStatus.google ? 'ready' : ''}>Login Google</span></div>
+            <div className="api-two-cols"><label>Magnific API Key<input type="password" value={apiKeys.MAGNIFIC_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, MAGNIFIC_API_KEY: event.target.value })} placeholder="Clave para Seedream 4.5" /></label><label>Magnific Webhook Secret<input type="password" value={apiKeys.MAGNIFIC_WEBHOOK_SECRET} onChange={(event) => setApiKeys({ ...apiKeys, MAGNIFIC_WEBHOOK_SECRET: event.target.value })} placeholder="Secreto de firma del webhook" /></label></div>
             <label>Kling API Key<input type="password" value={apiKeys.KLING_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_API_KEY: event.target.value })} placeholder="Bearer/API key de Kling" /></label>
             <div className="api-two-cols"><label>Kling Access Key<input type="password" value={apiKeys.KLING_ACCESS_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_ACCESS_KEY: event.target.value })} /></label><label>Kling Secret Key<input type="password" value={apiKeys.KLING_SECRET_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_SECRET_KEY: event.target.value })} /></label></div>
             <label>A2E API Token<input type="password" value={apiKeys.A2E_API_TOKEN} onChange={(event) => setApiKeys({ ...apiKeys, A2E_API_TOKEN: event.target.value })} placeholder="Token para Qwen/Wan en Contenido" /></label>

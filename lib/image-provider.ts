@@ -6,8 +6,7 @@ export type ImageRequest = {
   count: number;
   model?: string;
   referenceImage?: string;
-  soulId?: string;
-  referenceId?: string;
+  avatarReferences?: string[];
 };
 
 export type ImageGenerationResult = {

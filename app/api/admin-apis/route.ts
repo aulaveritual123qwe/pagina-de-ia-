@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 const CONFIG_KEY = 'admin:api-config';
 
 type ApiConfig = {
-  HIGGSFIELD_API_KEY?: string;
+  MAGNIFIC_API_KEY?: string;
+  MAGNIFIC_WEBHOOK_SECRET?: string;
   KLING_API_KEY?: string;
   KLING_ACCESS_KEY?: string;
   KLING_SECRET_KEY?: string;
@@ -19,7 +20,7 @@ type ApiConfig = {
 };
 
 type Store = {
-  get: (key: string, type?: 'json') => Promise<ApiConfig | string | null>;
+  get: (key: string, type?: 'json') => Promise<ApiConfig | null>;
   put: (key: string, value: string, options?: { expirationTtl?: number }) => Promise<void>;
 };
 
@@ -45,14 +46,15 @@ export async function GET() {
   const config = (await store().get(CONFIG_KEY, 'json').catch(() => null)) as ApiConfig | null;
   return json({
     configured: {
-      soul: Boolean(process.env.HIGGSFIELD_API_KEY || (env as unknown as Record<string, string | undefined>).HIGGSFIELD_API_KEY || config?.HIGGSFIELD_API_KEY),
+      magnific: Boolean(process.env.MAGNIFIC_API_KEY || (env as unknown as Record<string, string | undefined>).MAGNIFIC_API_KEY || config?.MAGNIFIC_API_KEY),
       kling: Boolean(process.env.KLING_API_KEY || process.env.KLING_ACCESS_KEY || (env as unknown as Record<string, string | undefined>).KLING_API_KEY || (env as unknown as Record<string, string | undefined>).KLING_ACCESS_KEY || config?.KLING_API_KEY || config?.KLING_ACCESS_KEY),
       a2e: Boolean(process.env.A2E_API_TOKEN || (env as unknown as Record<string, string | undefined>).A2E_API_TOKEN || config?.A2E_API_TOKEN),
       stripe: Boolean(process.env.STRIPE_SECRET_KEY || (env as unknown as Record<string, string | undefined>).STRIPE_SECRET_KEY || config?.STRIPE_SECRET_KEY),
       google: Boolean(process.env.GOOGLE_CLIENT_ID || (env as unknown as Record<string, string | undefined>).GOOGLE_CLIENT_ID || config?.GOOGLE_CLIENT_ID),
     },
     masked: {
-      HIGGSFIELD_API_KEY: mask(config?.HIGGSFIELD_API_KEY),
+      MAGNIFIC_API_KEY: mask(config?.MAGNIFIC_API_KEY),
+      MAGNIFIC_WEBHOOK_SECRET: mask(config?.MAGNIFIC_WEBHOOK_SECRET),
       KLING_API_KEY: mask(config?.KLING_API_KEY),
       KLING_ACCESS_KEY: mask(config?.KLING_ACCESS_KEY),
       KLING_SECRET_KEY: mask(config?.KLING_SECRET_KEY),
@@ -72,8 +74,8 @@ export async function POST(request: Request) {
   if (!(await isAdminAuthorized(store(), body?.adminEmail, body?.adminPassword))) return json({ error: 'Contraseña de administrador incorrecta.' }, 403);
 
   const current = (await store().get(CONFIG_KEY, 'json').catch(() => null)) as ApiConfig | null;
-  const next: ApiConfig = { ...(current ?? {}) };
-  const allowed: Array<keyof ApiConfig> = ['HIGGSFIELD_API_KEY', 'KLING_API_KEY', 'KLING_ACCESS_KEY', 'KLING_SECRET_KEY', 'A2E_API_TOKEN', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'];
+  const next: ApiConfig = { ...current };
+  const allowed: Array<keyof ApiConfig> = ['MAGNIFIC_API_KEY', 'MAGNIFIC_WEBHOOK_SECRET', 'KLING_API_KEY', 'KLING_ACCESS_KEY', 'KLING_SECRET_KEY', 'A2E_API_TOKEN', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'];
   for (const key of allowed) {
     const value = sanitize(body?.keys?.[key]);
     if (value) next[key] = value;
@@ -88,7 +90,7 @@ export async function POST(request: Request) {
   await store().put(CONFIG_KEY, JSON.stringify(next));
   return json({
     ok: true,
-    configured: { soul: Boolean(next.HIGGSFIELD_API_KEY), kling: Boolean(next.KLING_API_KEY || next.KLING_ACCESS_KEY), a2e: Boolean(next.A2E_API_TOKEN), stripe: Boolean(next.STRIPE_SECRET_KEY), google: Boolean(next.GOOGLE_CLIENT_ID) },
+    configured: { magnific: Boolean(next.MAGNIFIC_API_KEY), kling: Boolean(next.KLING_API_KEY || next.KLING_ACCESS_KEY), a2e: Boolean(next.A2E_API_TOKEN), stripe: Boolean(next.STRIPE_SECRET_KEY), google: Boolean(next.GOOGLE_CLIENT_ID) },
     hasPassword: Boolean(next.ADMIN_PASSWORD_HASH),
   });
 }

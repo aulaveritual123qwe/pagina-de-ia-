@@ -61,3 +61,39 @@ test('image generation uses A2E jobs and hides service errors', async () => {
     if (originalQwen === undefined) delete process.env.QWEN_API_KEY; else process.env.QWEN_API_KEY = originalQwen;
   }
 });
+
+test('Seedream uses saved avatar references and one optional reference', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.MAGNIFIC_API_KEY;
+  process.env.MAGNIFIC_API_KEY = 'test-only';
+  const request = (body) => new Request('https://studio.example/api/generate-image', { method: 'POST', body: JSON.stringify(body) });
+  try {
+    let submitted;
+    globalThis.fetch = async (url, options) => {
+      if (options?.method === 'POST') {
+        submitted = { url: String(url), headers: options.headers, body: JSON.parse(options.body) };
+        return Response.json({ data: { task_id: 'seedream-task', status: 'IN_PROGRESS' } });
+      }
+      if (String(url).endsWith('/seedream-task')) {
+        return Response.json({ data: { task_id: 'seedream-task', status: 'COMPLETED', generated: ['https://example.com/avatar.png'] } });
+      }
+      return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } });
+    };
+    const created = await POST(request({
+      prompt: 'Retrato editorial con luz cálida', model: 'magnific', count: 4,
+      avatarReferences: ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg', 'https://example.com/4.jpg', 'https://example.com/5.jpg'],
+      referenceImage: 'data:image/png;base64,dGVzdA==',
+    }));
+    assert.equal(created.status, 200);
+    assert.equal(submitted.url, 'https://api.magnific.com/v1/ai/text-to-image/seedream-v4-5-edit');
+    assert.equal(submitted.headers['x-magnific-api-key'], 'test-only');
+    assert.equal(submitted.body.reference_images.length, 5);
+    assert.deepEqual(submitted.body.reference_images.slice(0, 4), ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg', 'https://example.com/4.jpg']);
+    assert.equal(submitted.body.reference_images[4], 'data:image/png;base64,dGVzdA==');
+    const completed = await GET(new Request('https://studio.example/api/generate-image?jobId=test'));
+    assert.equal((await completed.json()).status, 'SUCCEEDED');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.MAGNIFIC_API_KEY; else process.env.MAGNIFIC_API_KEY = originalKey;
+  }
+});

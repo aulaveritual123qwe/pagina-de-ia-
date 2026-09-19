@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 type KVNamespaceLike = {
   put: (key: string, value: ArrayBuffer, options?: { expirationTtl?: number; metadata?: Record<string, unknown> }) => Promise<void>;
-  get?: (key: string, type?: 'json') => Promise<Record<string, string> | null>;
+  get?: (key: string, type?: 'json') => Promise<unknown | null>;
 };
 
 // Higgsfield's soul/reference endpoint requires a real public URL (max 2083 chars),
@@ -38,7 +38,7 @@ async function providerSecret(name: string): Promise<string | undefined> {
   const direct = secret(name);
   if (direct) return direct;
   const kv = (env as unknown as { IMAGE_CACHE?: KVNamespaceLike }).IMAGE_CACHE;
-  const config = await kv?.get?.('admin:api-config', 'json').catch(() => null);
+  const config = await kv?.get?.('admin:api-config', 'json').catch(() => null) as Record<string, unknown> | null;
   return typeof config?.[name] === 'string' ? config[name] : undefined;
 }
 
@@ -50,7 +50,7 @@ type GenerateImageBody = {
   count?: unknown;
   model?: unknown;
   referenceImage?: unknown;
-  soulId?: unknown;
+  avatarReferences?: unknown;
 };
 
 // Maps UI aspect ratios to Higgsfield Soul v2 API ('9:16' | '16:9' | '4:3' | '3:4' | '1:1' | '2:3' | '3:2')
@@ -99,6 +99,15 @@ const QWEN_TASK_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/tasks';
 // Synchronous image-editing endpoint used when a reference image is supplied.
 const QWEN_EDIT_URL = 'https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
 const KLING_API_URL = 'https://api.klingai.com/v1/images/generations';
+const MAGNIFIC_BASE_URL = 'https://api.magnific.com';
+const MAGNIFIC_SEEDREAM_EDIT_URL = `${MAGNIFIC_BASE_URL}/v1/ai/text-to-image/seedream-v4-5-edit`;
+const MAGNIFIC_ASPECT_RATIO_MAP: Record<string, string> = {
+  '1:1': 'square_1_1',
+  '3:4': 'traditional_3_4',
+  '4:5': 'portrait_2_3',
+  '9:16': 'social_story_9_16',
+  '16:9': 'widescreen_16_9',
+};
 
 function json(body: Record<string, unknown>, status = 200) {
   if (typeof body.error === 'string') {
@@ -106,7 +115,7 @@ function json(body: Record<string, unknown>, status = 200) {
     if (/inappropriate|sensitive|policy|moderation|nsfw|violation/i.test(message)) body.error = 'No se pudo procesar este contenido. Revisa el texto y la referencia.';
     else if (/timed? ?out|timeout|aborted/i.test(message)) body.error = 'La conexión tardó demasiado. Vuelve a consultar tu generación pendiente.';
     else if (/internal error|reference =/i.test(message)) body.error = 'El servicio de generación tuvo un error temporal. Inténtalo de nuevo más tarde.';
-    else if (/Qwen|QWEN|Higgsfield|Kling|Wan|DashScope|api.key|model.*not|invalid.*model/i.test(message)) body.error = 'El servicio de generación no pudo completar la solicitud. Contacta al administrador.';
+    else if (/Qwen|QWEN|Higgsfield|Magnific|Seedream|Kling|Wan|DashScope|api.key|model.*not|invalid.*model/i.test(message)) body.error = 'El servicio de generación no pudo completar la solicitud. Contacta al administrador.';
   }
   return new Response(JSON.stringify(body), {
     status,
@@ -119,7 +128,7 @@ function json(body: Record<string, unknown>, status = 200) {
 // subrequests, shared across the whole batch). So POST only submits and hands back a
 // jobId; the browser polls GET, and each poll is a fresh invocation with its own budget.
 
-type JobTask = { kind: 'higgsfield' | 'qwen' | 'kling' | 'a2e-qwen'; ref: string; url?: string; error?: string };
+type JobTask = { kind: 'magnific-seedream' | 'higgsfield' | 'qwen' | 'kling' | 'a2e-qwen'; ref: string; url?: string; error?: string };
 type Job = { tasks: JobTask[] };
 
 type JobKV = KVNamespaceLike & {
@@ -174,6 +183,45 @@ async function submitKling(apiKey: string, prompt: string, size: string): Promis
     throw new Error(describeProviderError(data?.message, `Kling respondió con estado ${response.status}.`));
   }
   return { kind: 'kling', ref: data.data.task_id };
+}
+
+type MagnificTaskResponse = {
+  data?: { task_id?: string; status?: string; generated?: string[] };
+  task_id?: string;
+  status?: string;
+  generated?: string[];
+  message?: string;
+  error?: string;
+};
+
+function selectAvatarReferences(rawReferences: unknown, additionalReference: string | null): string[] {
+  const masters = Array.isArray(rawReferences)
+    ? rawReferences.filter((value): value is string => typeof value === 'string' && value.length > 0).slice(0, 10)
+    : [];
+  const uniqueMasters = [...new Set(masters)];
+  if (additionalReference) return [...uniqueMasters.slice(0, 4), additionalReference].slice(0, 5);
+  return uniqueMasters.slice(0, 5);
+}
+
+async function submitMagnific(apiKey: string, prompt: string, referenceImages: string[], aspectRatio: string, webhookUrl?: string): Promise<JobTask> {
+  const response = await fetch(MAGNIFIC_SEEDREAM_EDIT_URL, {
+    method: 'POST',
+    signal: AbortSignal.timeout(60000),
+    headers: { 'Content-Type': 'application/json', 'x-magnific-api-key': apiKey },
+    body: JSON.stringify({
+      prompt,
+      reference_images: referenceImages,
+      aspect_ratio: MAGNIFIC_ASPECT_RATIO_MAP[aspectRatio] ?? MAGNIFIC_ASPECT_RATIO_MAP['3:4'],
+      enable_safety_checker: true,
+      ...(webhookUrl ? { webhook_url: webhookUrl } : {}),
+    }),
+  });
+  const data = (await response.json().catch(() => null)) as MagnificTaskResponse | null;
+  const taskId = data?.data?.task_id ?? data?.task_id;
+  if (!response.ok || !taskId) {
+    throw new Error(describeProviderError(data?.message ?? data?.error, `Magnific respondió con estado ${response.status}.`));
+  }
+  return { kind: 'magnific-seedream', ref: taskId };
 }
 
 const A2E_API_BASE = 'https://video.a2e.ai';
@@ -291,6 +339,25 @@ async function submitAll(count: number, submit: () => Promise<JobTask>): Promise
 async function checkTask(task: JobTask): Promise<JobTask> {
   if (task.url || task.error) return task;
   try {
+    if (task.kind === 'magnific-seedream') {
+      const apiKey = await providerSecret('MAGNIFIC_API_KEY');
+      if (!apiKey) return { ...task, error: 'El servicio de imagen no está configurado.' };
+      const response = await fetch(`${MAGNIFIC_SEEDREAM_EDIT_URL}/${encodeURIComponent(task.ref)}`, {
+        headers: { 'x-magnific-api-key': apiKey },
+        signal: AbortSignal.timeout(25000),
+      });
+      const data = (await response.json().catch(() => null)) as MagnificTaskResponse | null;
+      if (!response.ok) return { ...task, error: describeProviderError(data?.message ?? data?.error, `Magnific respondió ${response.status}.`) };
+      const status = (data?.data?.status ?? data?.status ?? '').toUpperCase();
+      const generated = data?.data?.generated ?? data?.generated ?? [];
+      if (['COMPLETED', 'COMPLETE', 'SUCCEEDED', 'SUCCESS', 'DONE'].includes(status)) {
+        return generated[0] ? { ...task, url: generated[0] } : { ...task, error: 'El servicio completó sin devolver imagen.' };
+      }
+      if (['FAILED', 'FAILURE', 'ERROR', 'CANCELED', 'CANCELLED'].includes(status)) {
+        return { ...task, error: describeProviderError(data?.message ?? data?.error, 'No se pudo generar la imagen.') };
+      }
+      return task;
+    }
     if (task.kind === 'higgsfield') {
       const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
       const response = await fetch(task.ref, { headers: { Authorization: `Key ${apiKey}` } });
@@ -462,12 +529,12 @@ export async function POST(request: Request) {
   }
 
   const style = typeof body?.style === 'string' ? body.style : 'Realista';
-  const requestedModel = typeof body?.model === 'string' ? body.model : 'higgsfield';
-  const model = ['higgsfield', 'qwen', 'kling'].includes(requestedModel) ? requestedModel : 'higgsfield';
+  const requestedModel = typeof body?.model === 'string' ? body.model : 'magnific';
+  const model = ['magnific', 'qwen', 'kling'].includes(requestedModel) ? requestedModel : 'magnific';
   const aspectRatio = body?.aspectRatio as string;
   const quality = typeof body?.quality === 'string' ? body.quality : 'Alta';
   const rawCount = typeof body?.count === 'number' ? body.count : Number(body?.count);
-  const count = [1, 2, 4].includes(rawCount) ? rawCount : 1;
+  const count = model === 'magnific' ? 1 : ([1, 2, 4].includes(rawCount) ? rawCount : 1);
   const referenceImage = typeof body?.referenceImage === 'string' && body.referenceImage.length > 0 ? body.referenceImage : null;
 
   // Quality has no dedicated parameter on these providers' basic endpoints, so it's
@@ -484,20 +551,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const soulReferenceId = typeof body?.referenceId === 'string' ? body.referenceId : typeof body?.soulId === 'string' ? body.soulId : '';
-    if (soulReferenceId) {
-      if (model !== 'higgsfield' || !/^[a-zA-Z0-9_-]{1,100}$/.test(soulReferenceId)) return json({ error: 'Los avatares con identidad guardada solo se pueden generar con el modelo de avatares.' }, 400);
-      const apiKey = await providerSecret('HIGGSFIELD_API_KEY');
+    if (model === 'magnific') {
+      const apiKey = await providerSecret('MAGNIFIC_API_KEY');
       if (!apiKey) return json({ error: 'El servicio de imagen no está configurado.' }, 501);
-      const authHeader = `Key ${apiKey}`;
-      const tasks: JobTask[] = [];
-      for (let index = 0; index < count; index++) {
-        const response = await fetch('https://api.higgsfield.ai/higgsfield-ai/soul/character', { method: 'POST', headers: { Authorization: authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: buildPrompt(prompt), custom_reference_id: soulReferenceId, custom_reference_strength: 1, aspect_ratio: HIGGSFIELD_ASPECT_RATIO_MAP[aspectRatio] ?? '1:1', resolution: '1080p' }) });
-        const data = await response.json() as HiggsfieldSubmitResponse;
-        if (!response.ok || !data.status_url) throw new Error(data.error ?? 'No se pudo generar con la identidad del avatar.');
-        tasks.push({ kind: 'higgsfield', ref: data.status_url });
-      }
-      return json({ jobId: await createJob(tasks) });
+      const referenceImages = selectAvatarReferences(body?.avatarReferences, referenceImage);
+      if (!referenceImages.length) return json({ error: 'Selecciona un avatar con referencias guardadas antes de generar.' }, 400);
+      const origin = new URL(request.url).origin;
+      const webhookUrl = isLocalOrigin(origin) ? undefined : `${origin}/api/magnific-webhook`;
+      const task = await submitMagnific(apiKey, buildPrompt(prompt), referenceImages, aspectRatio, webhookUrl);
+      return json({ jobId: await createJob([task]) });
     }
     if (model === 'qwen') {
       const a2eToken = await providerSecret('A2E_API_TOKEN');
