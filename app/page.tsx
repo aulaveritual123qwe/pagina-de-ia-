@@ -99,6 +99,8 @@ function charactersKey(email: string) { return `creators-characters:${email}`; }
 function userPlanKey(email: string) { return `creators-plan:${email}`; }
 function creditsKey(email: string) { return `creators-credits:${email}`; }
 function ageVerifiedKey(email: string) { return `creators-age-verified:${email}`; }
+function libraryKey(email: string) { return `creators-library:${email}`; }
+const LIBRARY_MAX_ITEMS = 300;
 function planIsPro(plan: string) { return plan !== 'Free'; }
 
 type Character = { id: string; name: string; referenceImage: string; resultImage: string; references?: string[]; soulId?: string; referenceId?: string; soulStatus?: string; description?: string; gallery?: string[] };
@@ -138,6 +140,7 @@ export default function HomePage() {
   const [view, setView] = useState<View>('crear');
   const [specialMode, setSpecialMode] = useState('Crear imagen');
   const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [library, setLibrary] = useState<string[]>([]);
   const [checkout, setCheckout] = useState<{ kind: 'plan' | 'topup'; planName?: string } | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [prompt, setPrompt] = useState(
@@ -226,6 +229,10 @@ export default function HomePage() {
           const savedCharacters = JSON.parse(window.localStorage.getItem(charactersKey(savedEmail)) ?? '[]');
           if (Array.isArray(savedCharacters)) setCharacters(savedCharacters);
         } catch { /* ignore malformed data */ }
+        try {
+          const savedLibrary = JSON.parse(window.localStorage.getItem(libraryKey(savedEmail)) ?? '[]');
+          if (Array.isArray(savedLibrary)) setLibrary(savedLibrary);
+        } catch { /* ignore malformed data */ }
         if (window.localStorage.getItem(onboardedKey(savedEmail)) !== 'true') {
           setShowOnboarding(true);
         }
@@ -250,6 +257,12 @@ export default function HomePage() {
       setCharacters(Array.isArray(savedCharacters) ? savedCharacters : []);
     } catch {
       setCharacters([]);
+    }
+    try {
+      const savedLibrary = JSON.parse(window.localStorage.getItem(libraryKey(email)) ?? '[]');
+      setLibrary(Array.isArray(savedLibrary) ? savedLibrary : []);
+    } catch {
+      setLibrary([]);
     }
     if (!openAdmin && window.localStorage.getItem(onboardedKey(email)) !== 'true') {
       setShowOnboarding(true);
@@ -319,7 +332,20 @@ export default function HomePage() {
     setFavorites([]);
     setUploadedImages([]);
     setCharacters([]);
+    setLibrary([]);
     setNotice('Cerraste sesión correctamente.');
+  }
+
+  // Every successful generation — Crear Imagen, Contenido especial, avatar
+  // creation — feeds the same persistent library instead of only the
+  // last-batch preview state each view keeps for itself.
+  function addToLibrary(images: string[]) {
+    if (!images.length) return;
+    setLibrary((current) => {
+      const next = [...images, ...current.filter((url) => !images.includes(url))].slice(0, LIBRARY_MAX_ITEMS);
+      if (accountEmail) window.localStorage.setItem(libraryKey(accountEmail), JSON.stringify(next));
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -393,6 +419,7 @@ export default function HomePage() {
             setIsGenerating(true);
             const { images, source } = await generateImages({ prompt: value.prompt.trim(), count: nextCount, style: nextStyle, aspectRatio: ratio, quality });
             setResults(images);
+            addToLibrary(images);
             setResultSource(source);
             setCredits((current) => Math.max(0, current - nextCount));
             setIsGenerating(false);
@@ -513,6 +540,7 @@ export default function HomePage() {
         referenceId: avatarReferenceId,
       });
       setResults(images);
+      addToLibrary(images);
       if (avatar) {
         setCharacters((current) => {
           const next = current.map((character) => character.id === avatar.id ? { ...character, resultImage: images[0], gallery: [...(character.gallery ?? []), ...images].slice(-60) } : character);
@@ -552,6 +580,7 @@ export default function HomePage() {
         referenceImage: specialReferenceImage?.dataUrl,
       });
       setSpecialResults(images);
+      addToLibrary(images);
       setSpecialResultSource(source);
       setCredits((current) => Math.max(0, current - images.length * IMAGE_CREDIT_COST));
       notify(
@@ -747,7 +776,7 @@ export default function HomePage() {
           {view === 'creaciones' && <CreacionesView credits={credits} plan={plan} characters={characters} selectedAvatar={selectedAvatar} onSelectAvatar={setSelectedAvatar} onCreated={saveCharacter} onNotify={notify} />}
           <div hidden={view !== 'video'}><VideoView credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="kling" /></div>
           <div hidden={view !== 'especial' || !ageConfirmed || specialMode !== 'Generar video'}><VideoView hideHeading credits={credits} onSpendCredits={spendCredits} onNotify={notify} provider="a2e" /></div>
-          {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...results]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
+          {view === 'biblioteca' && <LibraryView images={[...uploadedImages, ...library]} search={search} favorites={favorites} onToggleFavorite={toggleFavorite} onUpload={handleUpload} />}
           {view === 'planes' && <PlansView currentPlan={plan} onSelectPlan={selectPlan} onTopUp={() => setCheckout({ kind: 'topup' })} />}
           {checkout && (
             <CheckoutPanel
@@ -2152,9 +2181,6 @@ function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string
   return (
     <div className="view-stack">
       <PageHeading eyebrow="CRECE A TU RITMO" title="Planes y créditos" description="Elige un plan claro. Sin costos ocultos y con tus créditos siempre visibles." note="Más espacio para crear" />
-      {currentPlan === 'Free' && (
-        <section className="topup-banner"><div><Coins /><span><strong>Tu plan Free incluye 120 créditos gratis cada día</strong><small>Se renuevan automáticamente a la medianoche. No se acumulan de un día a otro.</small></span></div></section>
-      )}
       <div className="plans-grid">{plans.map((plan) => <article className={`plan-card ${plan.featured ? 'featured' : ''} ${currentPlan === plan.name ? 'current-plan' : ''}`} key={plan.name}>{plan.featured && <span className="popular">Más elegido</span>}<h2>{plan.name}</h2><p>Para creadores {plan.name === 'Inicial' ? 'que están empezando' : 'en crecimiento'}</p><div className="price"><span>US$</span><strong>{plan.price}</strong><small>/ mes</small></div><div className="plan-credits"><Coins size={20} /> <strong>{plan.credits}</strong> créditos al mes</div><ul><li><Check /> Generación de imágenes</li><li><Check /> Descargas en alta calidad</li><li><Check /> Biblioteca personal</li><li><Check /> Uso comercial</li></ul><Button variant={plan.featured ? 'default' : 'secondary'} type="button" onClick={() => onSelectPlan(plan.name)}>{currentPlan === plan.name ? 'Plan actual' : `Elegir ${plan.name}`}</Button></article>)}</div>
       <section className="topup-banner"><div><Coins /><span><strong>¿Solo necesitas más créditos?</strong><small>Recarga 700 créditos por US$9.90 sin cambiar de plan.</small></span></div><Button variant="secondary" type="button" onClick={onTopUp}>Recargar 700 créditos</Button></section>
     </div>
