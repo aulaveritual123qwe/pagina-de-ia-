@@ -186,13 +186,21 @@ async function submitKling(apiKey: string, prompt: string, size: string): Promis
 }
 
 type MagnificTaskResponse = {
-  data?: { task_id?: string; status?: string; generated?: string[] };
+  data?: { task_id?: string; status?: string; generated?: string[]; error?: string };
   task_id?: string;
   status?: string;
   generated?: string[];
   message?: string;
   error?: string;
+  // Magnific's own error shapes seen in practice: {"detail":"Not enough credits"}
+  // and {"message":"Validation error","invalid_params":[{"field","reason"}]}.
+  detail?: string;
+  invalid_params?: Array<{ field?: string; reason?: string }>;
 };
+
+function magnificErrorMessage(data: MagnificTaskResponse | null): string | undefined {
+  return data?.data?.error ?? data?.invalid_params?.[0]?.reason ?? data?.detail ?? data?.message ?? data?.error;
+}
 
 function selectAvatarReferences(rawReferences: unknown, additionalReference: string | null): string[] {
   const masters = Array.isArray(rawReferences)
@@ -219,7 +227,10 @@ async function submitMagnific(apiKey: string, prompt: string, referenceImages: s
   const data = (await response.json().catch(() => null)) as MagnificTaskResponse | null;
   const taskId = data?.data?.task_id ?? data?.task_id;
   if (!response.ok || !taskId) {
-    throw new Error(describeProviderError(data?.message ?? data?.error, `Magnific respondió con estado ${response.status}.`));
+    if (response.status === 403 && /not enough credits/i.test(magnificErrorMessage(data) ?? '')) {
+      throw new Error('El servicio de imagen no tiene saldo suficiente en Magnific. Contacta al administrador.');
+    }
+    throw new Error(describeProviderError(magnificErrorMessage(data), `Magnific respondió con estado ${response.status}.`));
   }
   return { kind: 'magnific-seedream', ref: taskId };
 }
@@ -354,7 +365,7 @@ async function checkTask(task: JobTask): Promise<JobTask> {
         return generated[0] ? { ...task, url: generated[0] } : { ...task, error: 'El servicio completó sin devolver imagen.' };
       }
       if (['FAILED', 'FAILURE', 'ERROR', 'CANCELED', 'CANCELLED'].includes(status)) {
-        return { ...task, error: describeProviderError(data?.message ?? data?.error, 'No se pudo generar la imagen.') };
+        return { ...task, error: describeProviderError(data?.data?.error ?? data?.message ?? data?.error, 'No se pudo generar la imagen.') };
       }
       return task;
     }
