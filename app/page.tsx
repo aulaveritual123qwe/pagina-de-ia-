@@ -1832,7 +1832,7 @@ function AvatarsView({ onNavigate, plan, onNotify, selectedAvatar, onSelectAvata
         <button type="button" className="avatar-upload-banner" onClick={onCreateCharacter}>
           <span className="avatar-upload-icon"><Upload size={22} /></span>
           <span className="avatar-upload-copy">
-            <strong>Sube 20 fotos de tu personaje</strong>
+            <strong>Sube 10 fotos de tu personaje</strong>
             <small>Necesitas 10 imágenes de referencia para crear un avatar consistente.</small>
           </span>
           <span className="avatar-upload-cta">Subir fotos <ArrowRight size={16} /></span>
