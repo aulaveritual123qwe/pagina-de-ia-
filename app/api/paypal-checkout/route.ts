@@ -3,9 +3,8 @@ import { PLANS, TOPUP } from '@/lib/plans';
 
 export const dynamic = 'force-dynamic';
 
-// Switch to 'https://api-m.paypal.com' once real (Live) PayPal credentials
-// replace the Sandbox ones in /admin — sandbox credentials never move real money.
-const PAYPAL_API_BASE = 'https://api-m.sandbox.paypal.com';
+// Live PayPal credentials are configured in /admin — this moves real money.
+const PAYPAL_API_BASE = 'https://api-m.paypal.com';
 
 type ConfigKV = {
   get: (key: string, type?: 'json') => Promise<Record<string, string> | null>;

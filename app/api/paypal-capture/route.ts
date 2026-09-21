@@ -2,7 +2,8 @@ import { env } from 'cloudflare:workers';
 
 export const dynamic = 'force-dynamic';
 
-const PAYPAL_API_BASE = 'https://api-m.sandbox.paypal.com';
+// Live PayPal credentials are configured in /admin — this moves real money.
+const PAYPAL_API_BASE = 'https://api-m.paypal.com';
 
 type ConfigKV = {
   get: (key: string, type?: 'json') => Promise<Record<string, string> | null>;

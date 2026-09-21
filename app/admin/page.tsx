@@ -384,7 +384,7 @@ export default function AdminPage() {
             </div>
             <div className={`p-4 rounded-lg ${config?.configured.paypal ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
               <div className="text-sm text-gray-400">Pagos (PayPal)</div>
-              <div className="text-lg font-bold">{config?.configured.paypal ? '✅ Activo (Sandbox)' : '❌ Inactivo'}</div>
+              <div className="text-lg font-bold">{config?.configured.paypal ? '✅ Activo (Live)' : '❌ Inactivo'}</div>
               {config?.masked.PAYPAL_CLIENT_ID && (
                 <div className="text-xs text-gray-500 mt-1">{config.masked.PAYPAL_CLIENT_ID}</div>
               )}
@@ -573,8 +573,8 @@ export default function AdminPage() {
               { key: 'STRIPE_WEBHOOK_SECRET', label: '🔐 Stripe Webhook Signing Secret (whsec_...)' },
               { key: 'GOOGLE_CLIENT_ID', label: '🔑 Google OAuth Client ID' },
               { key: 'GOOGLE_CLIENT_SECRET', label: '🔐 Google OAuth Client Secret' },
-              { key: 'PAYPAL_CLIENT_ID', label: '💳 PayPal Client ID (Sandbox)' },
-              { key: 'PAYPAL_CLIENT_SECRET', label: '🔐 PayPal Client Secret (Sandbox)' },
+              { key: 'PAYPAL_CLIENT_ID', label: '💳 PayPal Client ID (Live)' },
+              { key: 'PAYPAL_CLIENT_SECRET', label: '🔐 PayPal Client Secret (Live)' },
             ].map(({ key, label }) => (
               <div key={key}>
                 <label className="block text-sm text-gray-400 mb-1">{label}</label>
