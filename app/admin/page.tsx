@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Eye, EyeOff, Save, AlertCircle, Check, X, Users, Receipt, Lock } from 'lucide-react';
+import { Eye, EyeOff, Save, AlertCircle, Check, X, Users, Receipt, Lock, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 type YapeRequest = {
@@ -37,6 +37,7 @@ type ApiConfig = {
     a2e: boolean;
     stripe: boolean;
     google: boolean;
+    paypal: boolean;
   };
   masked: {
     MAGNIFIC_API_KEY: string | null;
@@ -49,6 +50,8 @@ type ApiConfig = {
     STRIPE_WEBHOOK_SECRET: string | null;
     GOOGLE_CLIENT_ID: string | null;
     GOOGLE_CLIENT_SECRET: string | null;
+    PAYPAL_CLIENT_ID: string | null;
+    PAYPAL_CLIENT_SECRET: string | null;
   };
   hasPassword?: boolean;
 };
@@ -76,6 +79,8 @@ export default function AdminPage() {
     STRIPE_WEBHOOK_SECRET: '',
     GOOGLE_CLIENT_ID: '',
     GOOGLE_CLIENT_SECRET: '',
+    PAYPAL_CLIENT_ID: '',
+    PAYPAL_CLIENT_SECRET: '',
   });
 
   const [yapeRequests, setYapeRequests] = useState<YapeRequest[]>([]);
@@ -202,6 +207,26 @@ export default function AdminPage() {
     }
   }
 
+  async function deleteUser(email: string) {
+    if (!window.confirm(`¿Eliminar la cuenta ${email}? Esta acción no se puede deshacer.`)) return;
+    setGrantingEmail(email);
+    try {
+      const res = await fetch('/api/admin-users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...authParams(), email }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) { setMessage(`❌ Error: ${data.error}`); return; }
+      setMessage(`✅ Cuenta ${email} eliminada`);
+      await loadUsers();
+    } catch {
+      setMessage('❌ No se pudo eliminar la cuenta.');
+    } finally {
+      setGrantingEmail('');
+    }
+  }
+
   async function handleSave() {
     if (adminEmail.trim() !== ADMIN_EMAIL) {
       setMessage('❌ Email de administrador incorrecto');
@@ -239,6 +264,8 @@ export default function AdminPage() {
           STRIPE_WEBHOOK_SECRET: '',
           GOOGLE_CLIENT_ID: '',
           GOOGLE_CLIENT_SECRET: '',
+          PAYPAL_CLIENT_ID: '',
+          PAYPAL_CLIENT_SECRET: '',
         });
         setNewAdminPassword('');
         await loadConfig();
@@ -319,7 +346,7 @@ export default function AdminPage() {
         {/* Status */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">📊 Estado de Servicios</h2>
-          <div className="grid grid-cols-5 gap-4">
+          <div className="grid grid-cols-6 gap-4">
             <div className={`p-4 rounded-lg ${config?.configured.magnific ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
               <div className="text-sm text-gray-400">Seedream 4.5</div>
               <div className="text-lg font-bold">{config?.configured.magnific ? '✅ Activo' : '❌ Inactivo'}</div>
@@ -355,6 +382,13 @@ export default function AdminPage() {
                 <div className="text-xs text-gray-500 mt-1">{config.masked.GOOGLE_CLIENT_ID}</div>
               )}
             </div>
+            <div className={`p-4 rounded-lg ${config?.configured.paypal ? 'bg-green-900/30 border border-green-500/50' : 'bg-gray-700/50 border border-gray-600/50'}`}>
+              <div className="text-sm text-gray-400">Pagos (PayPal)</div>
+              <div className="text-lg font-bold">{config?.configured.paypal ? '✅ Activo (Sandbox)' : '❌ Inactivo'}</div>
+              {config?.masked.PAYPAL_CLIENT_ID && (
+                <div className="text-xs text-gray-500 mt-1">{config.masked.PAYPAL_CLIENT_ID}</div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -388,6 +422,7 @@ export default function AdminPage() {
                     <th className="py-2 pr-4">Plan</th>
                     <th className="py-2 pr-4">Créditos</th>
                     <th className="py-2 pr-4">Asignar créditos</th>
+                    <th className="py-2 pr-4"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -407,6 +442,11 @@ export default function AdminPage() {
                           />
                           <Button size="sm" disabled={grantingEmail === user.email} onClick={() => grantCredits(user.email)}>Aplicar</Button>
                         </div>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <Button size="sm" variant="secondary" disabled={grantingEmail === user.email} onClick={() => deleteUser(user.email)} className="text-red-400 hover:text-red-300 flex gap-1">
+                          <Trash2 className="w-4 h-4" /> Eliminar
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -533,6 +573,8 @@ export default function AdminPage() {
               { key: 'STRIPE_WEBHOOK_SECRET', label: '🔐 Stripe Webhook Signing Secret (whsec_...)' },
               { key: 'GOOGLE_CLIENT_ID', label: '🔑 Google OAuth Client ID' },
               { key: 'GOOGLE_CLIENT_SECRET', label: '🔐 Google OAuth Client Secret' },
+              { key: 'PAYPAL_CLIENT_ID', label: '💳 PayPal Client ID (Sandbox)' },
+              { key: 'PAYPAL_CLIENT_SECRET', label: '🔐 PayPal Client Secret (Sandbox)' },
             ].map(({ key, label }) => (
               <div key={key}>
                 <label className="block text-sm text-gray-400 mb-1">{label}</label>

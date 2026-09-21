@@ -13,6 +13,7 @@ type CreditsRecord = { purchasedCredits?: number; dailyCredits?: number; dailyRe
 type KVLike = {
   get: (key: string, type?: 'json') => Promise<unknown>;
   put: (key: string, value: string) => Promise<void>;
+  delete: (key: string) => Promise<void>;
   list: (options: { prefix: string; cursor?: string }) => Promise<{ keys: Array<{ name: string }>; cursor?: string; list_complete: boolean }>;
 };
 
@@ -80,4 +81,19 @@ export async function POST(request: Request) {
   const nextPurchased = Math.max(0, (current?.purchasedCredits ?? 0) + amount);
   await store().put(key, JSON.stringify({ ...current, purchasedCredits: nextPurchased, plan: current?.plan ?? 'Free' }));
   return json({ ok: true, purchasedCredits: nextPurchased });
+}
+
+// Removes a user's server-side credits record entirely. This doesn't touch
+// their client-side localStorage login/characters — it's meant for cleaning
+// up test/placeholder accounts from the admin list, not full account deletion.
+export async function DELETE(request: Request) {
+  const body = (await request.json().catch(() => null)) as { adminEmail?: unknown; adminPassword?: unknown; email?: unknown } | null;
+  if (!(await isAdminAuthorized(store(), body?.adminEmail, body?.adminPassword))) return json({ error: 'No autorizado.' }, 403);
+
+  const targetEmail = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+  if (!targetEmail || !targetEmail.includes('@')) return json({ error: 'Cuenta inválida.' }, 400);
+  if (HIDDEN_EMAILS.has(targetEmail)) return json({ error: 'Esta cuenta no se puede modificar desde aquí.' }, 400);
+
+  await store().delete(creditsKey(targetEmail));
+  return json({ ok: true });
 }

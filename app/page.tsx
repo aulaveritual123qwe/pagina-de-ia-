@@ -509,6 +509,22 @@ export default function HomePage() {
     }
   }
 
+  async function startPayPalCheckout(kind: 'plan' | 'topup', planName?: string) {
+    if (!accountEmail) { notify('Inicia sesión para continuar con el pago.'); return; }
+    try {
+      const response = await fetch('/api/paypal-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: accountEmail, kind, planName }),
+      });
+      const data = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
+      if (!response.ok || !data?.url) { notify(data?.error ?? 'No se pudo iniciar el pago con PayPal.'); return; }
+      window.location.href = data.url;
+    } catch {
+      notify('No se pudo conectar con PayPal.');
+    }
+  }
+
   function selectPlan(name: string) {
     setCheckout({ kind: 'plan', planName: name });
   }
@@ -785,6 +801,7 @@ export default function HomePage() {
               onClose={() => setCheckout(null)}
               onNotify={notify}
               onCardCheckout={(kind, planName) => { setCheckout(null); void startCheckout(kind, planName); }}
+              onPayPalCheckout={(kind, planName) => { setCheckout(null); void startPayPalCheckout(kind, planName); }}
             />
           )}
           {view === 'ajustes' && (
@@ -2158,15 +2175,16 @@ function PlansView({ currentPlan, onSelectPlan, onTopUp }: { currentPlan: string
   );
 }
 
-function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCardCheckout }: {
+function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCardCheckout, onPayPalCheckout }: {
   kind: 'plan' | 'topup';
   planName?: string;
   accountEmail: string;
   onClose: () => void;
   onNotify: (message: string) => void;
   onCardCheckout: (kind: 'plan' | 'topup', planName?: string) => void;
+  onPayPalCheckout: (kind: 'plan' | 'topup', planName?: string) => void;
 }) {
-  const [method, setMethod] = useState<'yape' | 'tarjeta'>('yape');
+  const [method, setMethod] = useState<'yape' | 'tarjeta' | 'paypal'>('yape');
   const [payerPhone, setPayerPhone] = useState('');
   const [proofImage, setProofImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -2239,6 +2257,7 @@ function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCard
             <div className="checkout-methods" role="group" aria-label="Método de pago">
               <button type="button" aria-pressed={method === 'yape'} onClick={() => setMethod('yape')}><Smartphone size={16} /> Yape</button>
               <button type="button" aria-pressed={method === 'tarjeta'} onClick={() => setMethod('tarjeta')}><CreditCard size={16} /> Tarjeta</button>
+              <button type="button" aria-pressed={method === 'paypal'} onClick={() => setMethod('paypal')}><CreditCard size={16} /> PayPal</button>
             </div>
 
             {method === 'yape' ? (
@@ -2264,9 +2283,13 @@ function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCard
                   {submitting ? <LoaderCircle className="spin" size={18} /> : 'Ya pagué, notificar al administrador'}
                 </Button>
               </>
-            ) : (
+            ) : method === 'tarjeta' ? (
               <Button type="button" className="auth-submit" onClick={() => onCardCheckout(kind, planName)}>
                 Continuar con tarjeta <ArrowRight size={18} />
+              </Button>
+            ) : (
+              <Button type="button" className="auth-submit" onClick={() => onPayPalCheckout(kind, planName)}>
+                Continuar con PayPal <ArrowRight size={18} />
               </Button>
             )}
           </>
@@ -2283,8 +2306,8 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
   const [profile, setProfile] = useState({ name: profileName, email: accountEmail, language: 'Español', description: '' });
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPlan, setAdminPlan] = useState('Pro');
-  const [apiKeys, setApiKeys] = useState({ MAGNIFIC_API_KEY: '', MAGNIFIC_WEBHOOK_SECRET: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' });
-  const [apiStatus, setApiStatus] = useState({ magnific: false, kling: false, a2e: false, stripe: false, google: false });
+  const [apiKeys, setApiKeys] = useState({ MAGNIFIC_API_KEY: '', MAGNIFIC_WEBHOOK_SECRET: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '', PAYPAL_CLIENT_ID: '', PAYPAL_CLIENT_SECRET: '' });
+  const [apiStatus, setApiStatus] = useState({ magnific: false, kling: false, a2e: false, stripe: false, google: false, paypal: false });
 
   useEffect(() => {
     const saved = window.localStorage.getItem('creator-profile');
@@ -2300,7 +2323,7 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
     if (!isAdmin) return;
     fetch('/api/admin-apis', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((data: { configured?: { magnific?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean } }) => setApiStatus({ magnific: Boolean(data.configured?.magnific), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google) }))
+      .then((data: { configured?: { magnific?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean; paypal?: boolean } }) => setApiStatus({ magnific: Boolean(data.configured?.magnific), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google), paypal: Boolean(data.configured?.paypal) }))
       .catch(() => undefined);
   }, [isAdmin]);
 
@@ -2310,10 +2333,10 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ adminEmail: accountEmail, keys: apiKeys }),
     });
-    const data = await response.json() as { configured?: { magnific?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean }; error?: string };
+    const data = await response.json() as { configured?: { magnific?: boolean; kling?: boolean; a2e?: boolean; stripe?: boolean; google?: boolean; paypal?: boolean }; error?: string };
     if (!response.ok) { onNotify(data.error ?? 'No se pudieron guardar las APIs.'); return; }
-    setApiStatus({ magnific: Boolean(data.configured?.magnific), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google) });
-    setApiKeys({ MAGNIFIC_API_KEY: '', MAGNIFIC_WEBHOOK_SECRET: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '' });
+    setApiStatus({ magnific: Boolean(data.configured?.magnific), kling: Boolean(data.configured?.kling), a2e: Boolean(data.configured?.a2e), stripe: Boolean(data.configured?.stripe), google: Boolean(data.configured?.google), paypal: Boolean(data.configured?.paypal) });
+    setApiKeys({ MAGNIFIC_API_KEY: '', MAGNIFIC_WEBHOOK_SECRET: '', KLING_API_KEY: '', KLING_ACCESS_KEY: '', KLING_SECRET_KEY: '', A2E_API_TOKEN: '', STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '', PAYPAL_CLIENT_ID: '', PAYPAL_CLIENT_SECRET: '' });
     onNotify('APIs vinculadas correctamente.');
   }
 
@@ -2350,13 +2373,14 @@ function SettingsView({ onNotify, profileName, accountEmail, onProfileNameChange
           {isAdmin && <div className="admin-access-card api-admin-card">
             <h2>APIs de generación</h2>
             <p>Vincula las claves que usará la plataforma para Crear Imagen, Generar Video y Contenido. Las claves se guardan en el servidor y no se muestran completas.</p>
-            <div className="api-status-row"><span className={apiStatus.magnific ? 'ready' : ''}>Seedream 4.5</span><span className={apiStatus.kling ? 'ready' : ''}>Kling video</span><span className={apiStatus.a2e ? 'ready' : ''}>A2E Contenido</span><span className={apiStatus.stripe ? 'ready' : ''}>Pagos (Stripe)</span><span className={apiStatus.google ? 'ready' : ''}>Login Google</span></div>
+            <div className="api-status-row"><span className={apiStatus.magnific ? 'ready' : ''}>Seedream 4.5</span><span className={apiStatus.kling ? 'ready' : ''}>Kling video</span><span className={apiStatus.a2e ? 'ready' : ''}>A2E Contenido</span><span className={apiStatus.stripe ? 'ready' : ''}>Pagos (Stripe)</span><span className={apiStatus.google ? 'ready' : ''}>Login Google</span><span className={apiStatus.paypal ? 'ready' : ''}>Pagos (PayPal)</span></div>
             <div className="api-two-cols"><label>Magnific API Key<input type="password" value={apiKeys.MAGNIFIC_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, MAGNIFIC_API_KEY: event.target.value })} placeholder="Clave para Seedream 4.5" /></label><label>Magnific Webhook Secret<input type="password" value={apiKeys.MAGNIFIC_WEBHOOK_SECRET} onChange={(event) => setApiKeys({ ...apiKeys, MAGNIFIC_WEBHOOK_SECRET: event.target.value })} placeholder="Secreto de firma del webhook" /></label></div>
             <label>Kling API Key<input type="password" value={apiKeys.KLING_API_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_API_KEY: event.target.value })} placeholder="Bearer/API key de Kling" /></label>
             <div className="api-two-cols"><label>Kling Access Key<input type="password" value={apiKeys.KLING_ACCESS_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_ACCESS_KEY: event.target.value })} /></label><label>Kling Secret Key<input type="password" value={apiKeys.KLING_SECRET_KEY} onChange={(event) => setApiKeys({ ...apiKeys, KLING_SECRET_KEY: event.target.value })} /></label></div>
             <label>A2E API Token<input type="password" value={apiKeys.A2E_API_TOKEN} onChange={(event) => setApiKeys({ ...apiKeys, A2E_API_TOKEN: event.target.value })} placeholder="Token para Qwen/Wan en Contenido" /></label>
             <div className="api-two-cols"><label>Stripe Secret Key<input type="password" value={apiKeys.STRIPE_SECRET_KEY} onChange={(event) => setApiKeys({ ...apiKeys, STRIPE_SECRET_KEY: event.target.value })} placeholder="sk_live_... / sk_test_..." /></label><label>Stripe Webhook Secret<input type="password" value={apiKeys.STRIPE_WEBHOOK_SECRET} onChange={(event) => setApiKeys({ ...apiKeys, STRIPE_WEBHOOK_SECRET: event.target.value })} placeholder="whsec_..." /></label></div>
             <div className="api-two-cols"><label>Google Client ID<input type="password" value={apiKeys.GOOGLE_CLIENT_ID} onChange={(event) => setApiKeys({ ...apiKeys, GOOGLE_CLIENT_ID: event.target.value })} placeholder="....apps.googleusercontent.com" /></label><label>Google Client Secret<input type="password" value={apiKeys.GOOGLE_CLIENT_SECRET} onChange={(event) => setApiKeys({ ...apiKeys, GOOGLE_CLIENT_SECRET: event.target.value })} /></label></div>
+            <div className="api-two-cols"><label>PayPal Client ID<input type="password" value={apiKeys.PAYPAL_CLIENT_ID} onChange={(event) => setApiKeys({ ...apiKeys, PAYPAL_CLIENT_ID: event.target.value })} placeholder="Sandbox o Live" /></label><label>PayPal Client Secret<input type="password" value={apiKeys.PAYPAL_CLIENT_SECRET} onChange={(event) => setApiKeys({ ...apiKeys, PAYPAL_CLIENT_SECRET: event.target.value })} /></label></div>
             <Button type="button" onClick={saveApiKeys}>Vincular APIs</Button>
           </div>}
 

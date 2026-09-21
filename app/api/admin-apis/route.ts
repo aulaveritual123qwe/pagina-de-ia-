@@ -16,6 +16,8 @@ type ApiConfig = {
   STRIPE_WEBHOOK_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  PAYPAL_CLIENT_ID?: string;
+  PAYPAL_CLIENT_SECRET?: string;
   ADMIN_PASSWORD_HASH?: string;
 };
 
@@ -51,6 +53,7 @@ export async function GET() {
       a2e: Boolean(process.env.A2E_API_TOKEN || (env as unknown as Record<string, string | undefined>).A2E_API_TOKEN || config?.A2E_API_TOKEN),
       stripe: Boolean(process.env.STRIPE_SECRET_KEY || (env as unknown as Record<string, string | undefined>).STRIPE_SECRET_KEY || config?.STRIPE_SECRET_KEY),
       google: Boolean(process.env.GOOGLE_CLIENT_ID || (env as unknown as Record<string, string | undefined>).GOOGLE_CLIENT_ID || config?.GOOGLE_CLIENT_ID),
+      paypal: Boolean(process.env.PAYPAL_CLIENT_ID || (env as unknown as Record<string, string | undefined>).PAYPAL_CLIENT_ID || config?.PAYPAL_CLIENT_ID),
     },
     masked: {
       MAGNIFIC_API_KEY: mask(config?.MAGNIFIC_API_KEY),
@@ -63,6 +66,8 @@ export async function GET() {
       STRIPE_WEBHOOK_SECRET: mask(config?.STRIPE_WEBHOOK_SECRET),
       GOOGLE_CLIENT_ID: mask(config?.GOOGLE_CLIENT_ID),
       GOOGLE_CLIENT_SECRET: mask(config?.GOOGLE_CLIENT_SECRET),
+      PAYPAL_CLIENT_ID: mask(config?.PAYPAL_CLIENT_ID),
+      PAYPAL_CLIENT_SECRET: mask(config?.PAYPAL_CLIENT_SECRET),
     },
     hasPassword: Boolean(config?.ADMIN_PASSWORD_HASH),
   });
@@ -75,7 +80,7 @@ export async function POST(request: Request) {
 
   const current = (await store().get(CONFIG_KEY, 'json').catch(() => null)) as ApiConfig | null;
   const next: ApiConfig = { ...current };
-  const allowed: Array<keyof ApiConfig> = ['MAGNIFIC_API_KEY', 'MAGNIFIC_WEBHOOK_SECRET', 'KLING_API_KEY', 'KLING_ACCESS_KEY', 'KLING_SECRET_KEY', 'A2E_API_TOKEN', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'];
+  const allowed: Array<keyof ApiConfig> = ['MAGNIFIC_API_KEY', 'MAGNIFIC_WEBHOOK_SECRET', 'KLING_API_KEY', 'KLING_ACCESS_KEY', 'KLING_SECRET_KEY', 'A2E_API_TOKEN', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET'];
   for (const key of allowed) {
     const value = sanitize(body?.keys?.[key]);
     if (value) next[key] = value;
@@ -90,7 +95,7 @@ export async function POST(request: Request) {
   await store().put(CONFIG_KEY, JSON.stringify(next));
   return json({
     ok: true,
-    configured: { magnific: Boolean(next.MAGNIFIC_API_KEY), kling: Boolean(next.KLING_API_KEY || next.KLING_ACCESS_KEY), a2e: Boolean(next.A2E_API_TOKEN), stripe: Boolean(next.STRIPE_SECRET_KEY), google: Boolean(next.GOOGLE_CLIENT_ID) },
+    configured: { magnific: Boolean(next.MAGNIFIC_API_KEY), kling: Boolean(next.KLING_API_KEY || next.KLING_ACCESS_KEY), a2e: Boolean(next.A2E_API_TOKEN), stripe: Boolean(next.STRIPE_SECRET_KEY), google: Boolean(next.GOOGLE_CLIENT_ID), paypal: Boolean(next.PAYPAL_CLIENT_ID) },
     hasPassword: Boolean(next.ADMIN_PASSWORD_HASH),
   });
 }

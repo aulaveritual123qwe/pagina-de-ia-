@@ -584,7 +584,7 @@ export async function POST(request: Request) {
       const tasks = await submitAll(count, () => submitA2E(a2eToken, 'a2e-qwen', '/api/v1/userQwen2Image/start', {
         name: 'imagen-avatar',
         prompt: fullPrompt,
-        model: 'qwen-image-2.0-pro',
+        model: 'qwen-image-3.0-pro',
         input_images: a2eReferenceImage ? [a2eReferenceImage] : [],
         size,
       }));
