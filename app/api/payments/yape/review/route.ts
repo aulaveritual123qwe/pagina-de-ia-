@@ -11,6 +11,7 @@ type YapeRequest = {
   credits: number;
   priceUsd: number;
   payerPhone: string;
+  proofImageUrl?: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: number;
 };
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
       credits: record.credits,
       amountUsd: record.priceUsd,
       payerPhone: record.payerPhone,
+      proofImageUrl: record.proofImageUrl,
       createdAt: Date.now(),
     }));
   }

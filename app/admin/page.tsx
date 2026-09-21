@@ -21,12 +21,13 @@ type AdminUser = { email: string; plan: string; credits: number; purchasedCredit
 
 type PaymentRecord = {
   email: string;
-  method: 'stripe' | 'yape';
+  method: 'stripe' | 'yape' | 'paypal';
   kind: 'plan' | 'topup';
   planName: string;
   credits: number;
   amountUsd: number;
   payerPhone?: string;
+  proofImageUrl?: string;
   createdAt: number;
 };
 
@@ -481,6 +482,7 @@ export default function AdminPage() {
                     <th className="py-2 pr-4">Método</th>
                     <th className="py-2 pr-4">Detalle</th>
                     <th className="py-2 pr-4">Monto</th>
+                    <th className="py-2 pr-4">Comprobante</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -488,9 +490,18 @@ export default function AdminPage() {
                     <tr key={index} className="border-b border-gray-800">
                       <td className="py-2 pr-4">{new Date(payment.createdAt).toLocaleString('es-PE')}</td>
                       <td className="py-2 pr-4">{payment.email}</td>
-                      <td className="py-2 pr-4">{payment.method === 'stripe' ? '💳 Tarjeta' : '📱 Yape'}</td>
+                      <td className="py-2 pr-4">{payment.method === 'stripe' ? '💳 Tarjeta' : payment.method === 'paypal' ? '🅿️ PayPal' : '📱 Yape'}</td>
                       <td className="py-2 pr-4">{payment.kind === 'plan' ? `Plan ${payment.planName}` : 'Recarga'} · {payment.credits} créditos</td>
                       <td className="py-2 pr-4">US$ {payment.amountUsd}</td>
+                      <td className="py-2 pr-4">
+                        {payment.proofImageUrl ? (
+                          <a href={payment.proofImageUrl} target="_blank" rel="noreferrer">
+                            <img src={payment.proofImageUrl} alt="Comprobante" className="w-12 h-12 object-cover rounded border border-gray-600" />
+                          </a>
+                        ) : (
+                          <span className="text-gray-500 text-xs">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

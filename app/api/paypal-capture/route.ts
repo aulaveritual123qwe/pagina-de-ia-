@@ -88,11 +88,13 @@ export async function GET(request: Request) {
     const current = (await store().get(key, 'json').catch(() => null)) as CreditsRecord | null;
     const nextPurchased = (current?.purchasedCredits ?? 0) + credits;
     await store().put(key, JSON.stringify({ ...current, purchasedCredits: nextPurchased, plan: planName || current?.plan || 'Free' }));
-    await store().put(`payment-log:${Date.now()}-${crypto.randomUUID()}`, JSON.stringify({
+    // Keyed by order id (not a random uuid) so the post-payment proof upload
+    // can find and attach to this exact record afterward.
+    await store().put(`payment-log:paypal-${orderId}`, JSON.stringify({
       email: email.trim().toLowerCase(), method: 'paypal', kind, planName, credits, amountUsd, createdAt: Date.now(),
     }));
 
-    return Response.redirect(`${origin}/?checkout=success`, 302);
+    return Response.redirect(`${origin}/?checkout=success&paypalOrderId=${encodeURIComponent(orderId)}`, 302);
   } catch {
     return fail();
   }

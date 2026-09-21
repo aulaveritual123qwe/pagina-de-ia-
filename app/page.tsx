@@ -142,6 +142,7 @@ export default function HomePage() {
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [library, setLibrary] = useState<string[]>([]);
   const [checkout, setCheckout] = useState<{ kind: 'plan' | 'topup'; planName?: string } | null>(null);
+  const [paypalProofOrderId, setPaypalProofOrderId] = useState('');
   const [mobileNav, setMobileNav] = useState(false);
   const [prompt, setPrompt] = useState(
     'Retrato editorial en una cafetería creativa, luz cálida, reflejos violeta, fotografía realista y natural.',
@@ -369,15 +370,19 @@ export default function HomePage() {
     creditsWatchRef.current = { email: accountEmail, credits };
   }, [credits, accountEmail]);
 
-  // Stripe redirects back here after checkout; the webhook is the source of truth
-  // for the new balance, so pull it from the server instead of guessing locally.
+  // Stripe/PayPal redirect back here after checkout; the server (webhook or
+  // capture handler) is the source of truth for the new balance, so pull it
+  // instead of guessing locally.
   useEffect(() => {
     if (!sessionChecked || !accountEmail) return;
-    const checkout = new URLSearchParams(window.location.search).get('checkout');
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
     if (!checkout) return;
+    const paypalOrderId = params.get('paypalOrderId');
     window.history.replaceState({}, '', window.location.pathname);
     if (checkout === 'success') {
       void syncCreditsFromServer(accountEmail).then(() => notify('¡Pago exitoso! Tus créditos se actualizaron.'));
+      if (paypalOrderId) setPaypalProofOrderId(paypalOrderId);
     } else if (checkout === 'cancel') {
       notify('Pago cancelado.');
     }
@@ -803,6 +808,9 @@ export default function HomePage() {
               onCardCheckout={(kind, planName) => { setCheckout(null); void startCheckout(kind, planName); }}
               onPayPalCheckout={(kind, planName) => { setCheckout(null); void startPayPalCheckout(kind, planName); }}
             />
+          )}
+          {paypalProofOrderId && (
+            <PayPalProofPanel orderId={paypalProofOrderId} onClose={() => setPaypalProofOrderId('')} onNotify={notify} />
           )}
           {view === 'ajustes' && (
             <SettingsView
@@ -2292,6 +2300,78 @@ function CheckoutPanel({ kind, planName, accountEmail, onClose, onNotify, onCard
                 Continuar con PayPal <ArrowRight size={18} />
               </Button>
             )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// PayPal's own capture already verified and paid the order — this is purely
+// extra documentation for the admin, requested for consistency with the
+// manual Yape flow. Skipping it never costs the user their credits.
+function PayPalProofPanel({ orderId, onClose, onNotify }: { orderId: string; onClose: () => void; onNotify: (message: string) => void }) {
+  const [proofImage, setProofImage] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  function handleSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { onNotify('La imagen debe pesar menos de 8 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setProofImage({ name: file.name, dataUrl: reader.result });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function submitProof() {
+    if (!proofImage) { onNotify('Sube una captura de pantalla del pago.'); return; }
+    setSubmitting(true);
+    try {
+      const response = await fetch('/api/payments/paypal-proof', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, proofImage: proofImage.dataUrl }),
+      });
+      const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !data?.ok) { onNotify(data?.error ?? 'No se pudo subir el comprobante.'); return; }
+      setSubmitted(true);
+    } catch {
+      onNotify('No se pudo subir el comprobante.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="onboarding-overlay" role="dialog" aria-modal="true" aria-label="Comprobante de pago">
+      <div className="onboarding-card checkout-card">
+        <button type="button" className="onboarding-close" onClick={onClose} aria-label="Cerrar"><X size={18} /></button>
+        {submitted ? (
+          <div className="checkout-pending">
+            <Check size={36} color="#1fa872" />
+            <h2>¡Listo!</h2>
+            <p>Guardamos tu comprobante. Tus créditos ya están disponibles.</p>
+            <Button type="button" onClick={onClose}>Entendido</Button>
+          </div>
+        ) : (
+          <>
+            <h2>¡Pago aprobado por PayPal!</h2>
+            <p style={{ color: '#7b8094', fontSize: 13, marginBottom: 16 }}>Tus créditos ya se acreditaron. Sube una captura de pantalla del pago para nuestros registros.</p>
+            <label className="checkout-field">
+              Captura de pantalla del pago
+              <label className="checkout-proof-upload">
+                {proofImage ? <img src={proofImage.dataUrl} alt="Comprobante de pago" /> : <><Upload size={20} /><span>Sube tu comprobante</span></>}
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleSelect} />
+              </label>
+            </label>
+            <Button type="button" className="auth-submit" disabled={submitting} onClick={submitProof}>
+              {submitting ? <LoaderCircle className="spin" size={18} /> : 'Enviar comprobante'}
+            </Button>
+            <button type="button" className="link-button" style={{ marginTop: 10 }} onClick={onClose}>Omitir por ahora</button>
           </>
         )}
       </div>
