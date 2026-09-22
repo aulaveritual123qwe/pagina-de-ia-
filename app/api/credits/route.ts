@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 
 export const dynamic = 'force-dynamic';
 
-const DAILY_FREE_CREDITS = 120;
+const SIGNUP_CREDITS = 120;
 const UNLIMITED_CREDITS_DISPLAY = 999_999_999;
 // Accounts granted unlimited usage: never deducted, always reports a balance
 // large enough that no real usage could ever exhaust it.
@@ -36,40 +36,33 @@ function json(body: Record<string, unknown>, status = 200) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-// Free-plan users get a 120-credit allowance that RESETS (doesn't accumulate)
-// once per calendar day. Purchased credits (Stripe/Yape/plan grants) live in a
-// separate field that this reset never touches, so a free refill can never
-// erase money someone actually paid.
+// New accounts get a one-time 120-credit grant when their record is first
+// created — never repeated, no daily recharge. Any leftover dailyCredits from
+// the old recurring-reset system are folded into purchasedCredits once (so
+// nobody loses a balance they already had) and the field is retired from
+// then on. From here out, every credit — signup grant, admin grant, or a
+// paid plan/top-up — lives in purchasedCredits and is only ever added to by
+// a real payment or an admin decision.
 async function loadBalance(email: string): Promise<{ record: Required<CreditsRecord>; total: number }> {
   const key = creditsKey(email);
-  const current = (await store().get(key, 'json').catch(() => null)) ?? {};
-  const plan = current.plan ?? 'Free';
+  const existing = await store().get(key, 'json').catch(() => null);
 
   if (UNLIMITED_EMAILS.has(email)) {
-    const record: Required<CreditsRecord> = { purchasedCredits: UNLIMITED_CREDITS_DISPLAY, dailyCredits: 0, dailyResetDate: current.dailyResetDate ?? '', plan };
+    const record: Required<CreditsRecord> = { purchasedCredits: UNLIMITED_CREDITS_DISPLAY, dailyCredits: 0, dailyResetDate: existing?.dailyResetDate ?? '', plan: existing?.plan ?? 'Free' };
     return { record, total: UNLIMITED_CREDITS_DISPLAY };
   }
 
-  let dailyCredits = current.dailyCredits ?? 0;
-  let dailyResetDate = current.dailyResetDate ?? '';
-  const today = todayUtc();
-  let changed = false;
-
-  if (plan === 'Free') {
-    if (dailyResetDate !== today) {
-      dailyCredits = DAILY_FREE_CREDITS;
-      dailyResetDate = today;
-      changed = true;
-    }
-  } else if (dailyCredits !== 0) {
-    dailyCredits = 0;
-    changed = true;
+  if (!existing) {
+    const record: Required<CreditsRecord> = { purchasedCredits: SIGNUP_CREDITS, dailyCredits: 0, dailyResetDate: todayUtc(), plan: 'Free' };
+    await store().put(key, JSON.stringify(record));
+    return { record, total: record.purchasedCredits };
   }
 
-  const record: Required<CreditsRecord> = { purchasedCredits: current.purchasedCredits ?? 0, dailyCredits, dailyResetDate, plan };
-  if (changed) await store().put(key, JSON.stringify(record));
-  const total = plan === 'Free' ? record.dailyCredits + record.purchasedCredits : record.purchasedCredits;
-  return { record, total };
+  const plan = existing.plan ?? 'Free';
+  const leftoverDaily = existing.dailyCredits ?? 0;
+  const record: Required<CreditsRecord> = { purchasedCredits: (existing.purchasedCredits ?? 0) + leftoverDaily, dailyCredits: 0, dailyResetDate: existing.dailyResetDate ?? '', plan };
+  if (leftoverDaily !== 0) await store().put(key, JSON.stringify(record));
+  return { record, total: record.purchasedCredits };
 }
 
 export async function GET(request: Request) {
@@ -79,10 +72,9 @@ export async function GET(request: Request) {
   return json({ credits: total, plan: record.plan, dailyCredits: record.dailyCredits, purchasedCredits: record.purchasedCredits });
 }
 
-// Client-side spends (image/video generation) sync here: deducted from the
-// daily allowance first, then from purchased credits, so the server balance
-// — the one the daily reset and Stripe/Yape payments operate on — stays
-// accurate instead of drifting from what the browser already used.
+// Client-side spends (image/video generation) sync here, deducted straight
+// from purchasedCredits — the single pool that holds the signup grant, admin
+// grants, and paid top-ups alike.
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { email?: unknown; spend?: unknown } | null;
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
@@ -93,17 +85,9 @@ export async function POST(request: Request) {
   if (UNLIMITED_EMAILS.has(email)) return json({ ok: true, credits: UNLIMITED_CREDITS_DISPLAY });
 
   const { record } = await loadBalance(email);
-  let remaining = Math.floor(spend);
-  const fromDaily = Math.min(record.dailyCredits, remaining);
-  remaining -= fromDaily;
-  const fromPurchased = Math.min(record.purchasedCredits, remaining);
+  const fromPurchased = Math.min(record.purchasedCredits, Math.floor(spend));
 
-  const next: Required<CreditsRecord> = {
-    ...record,
-    dailyCredits: record.dailyCredits - fromDaily,
-    purchasedCredits: record.purchasedCredits - fromPurchased,
-  };
+  const next: Required<CreditsRecord> = { ...record, purchasedCredits: record.purchasedCredits - fromPurchased };
   await store().put(creditsKey(email), JSON.stringify(next));
-  const total = next.plan === 'Free' ? next.dailyCredits + next.purchasedCredits : next.purchasedCredits;
-  return json({ ok: true, credits: total });
+  return json({ ok: true, credits: next.purchasedCredits });
 }

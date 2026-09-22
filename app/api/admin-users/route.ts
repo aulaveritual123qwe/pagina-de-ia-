@@ -50,9 +50,13 @@ export async function GET(request: Request) {
     if (HIDDEN_EMAILS.has(email)) continue;
     const record = (await store().get(creditsKey(email), 'json').catch(() => null)) as CreditsRecord | null;
     const plan = record?.plan ?? 'Free';
+    // dailyCredits is a retired field (old recurring-reset system); fold any
+    // leftover into the total here too, so the admin list matches what
+    // /api/credits reports even before that account's own next visit
+    // triggers its one-time migration into purchasedCredits.
     const purchasedCredits = record?.purchasedCredits ?? 0;
     const dailyCredits = record?.dailyCredits ?? 0;
-    const credits = plan === 'Free' ? dailyCredits + purchasedCredits : purchasedCredits;
+    const credits = purchasedCredits + dailyCredits;
     users.push({ email, plan, credits, purchasedCredits, dailyCredits });
   }
   users.sort((a, b) => a.email.localeCompare(b.email));
