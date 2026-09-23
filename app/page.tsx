@@ -212,6 +212,30 @@ export default function HomePage() {
     } catch { /* keep the cached local value on network failure */ }
   }
 
+  // The library lives in localStorage per-browser, so work generated on one
+  // device (e.g. a phone) wouldn't show up on another. This pulls the
+  // server's copy, merges it with whatever this device already has locally,
+  // and pushes the merged result back — so every device converges instead
+  // of the most recent login silently overwriting the others.
+  async function syncLibraryFromServer(email: string, localLibrary: string[]) {
+    try {
+      const response = await fetch(`/api/library?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
+      const data = (await response.json().catch(() => null)) as { library?: unknown } | null;
+      if (!response.ok || !data || !Array.isArray(data.library)) return;
+      const serverLibrary = data.library.filter((url): url is string => typeof url === 'string');
+      const merged = [...localLibrary, ...serverLibrary.filter((url) => !localLibrary.includes(url))].slice(0, LIBRARY_MAX_ITEMS);
+      setLibrary(merged);
+      window.localStorage.setItem(libraryKey(email), JSON.stringify(merged));
+      if (merged.length !== serverLibrary.length) {
+        void fetch('/api/library', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, library: merged }),
+        }).catch(() => undefined);
+      }
+    } catch { /* keep the cached local value on network failure */ }
+  }
+
   useEffect(() => {
     (async () => {
       const users = loadUsers();
@@ -230,10 +254,12 @@ export default function HomePage() {
           const savedCharacters = JSON.parse(window.localStorage.getItem(charactersKey(savedEmail)) ?? '[]');
           if (Array.isArray(savedCharacters)) setCharacters(savedCharacters);
         } catch { /* ignore malformed data */ }
+        let restoredLibrary: string[] = [];
         try {
           const savedLibrary = JSON.parse(window.localStorage.getItem(libraryKey(savedEmail)) ?? '[]');
-          if (Array.isArray(savedLibrary)) setLibrary(savedLibrary);
+          if (Array.isArray(savedLibrary)) { restoredLibrary = savedLibrary; setLibrary(savedLibrary); }
         } catch { /* ignore malformed data */ }
+        void syncLibraryFromServer(savedEmail, restoredLibrary);
         if (window.localStorage.getItem(onboardedKey(savedEmail)) !== 'true') {
           setShowOnboarding(true);
         }
@@ -259,12 +285,15 @@ export default function HomePage() {
     } catch {
       setCharacters([]);
     }
+    let restoredLibrary: string[] = [];
     try {
       const savedLibrary = JSON.parse(window.localStorage.getItem(libraryKey(email)) ?? '[]');
-      setLibrary(Array.isArray(savedLibrary) ? savedLibrary : []);
+      restoredLibrary = Array.isArray(savedLibrary) ? savedLibrary : [];
+      setLibrary(restoredLibrary);
     } catch {
       setLibrary([]);
     }
+    void syncLibraryFromServer(email, restoredLibrary);
     if (!openAdmin && window.localStorage.getItem(onboardedKey(email)) !== 'true') {
       setShowOnboarding(true);
     }
@@ -344,7 +373,14 @@ export default function HomePage() {
     if (!images.length) return;
     setLibrary((current) => {
       const next = [...images, ...current.filter((url) => !images.includes(url))].slice(0, LIBRARY_MAX_ITEMS);
-      if (accountEmail) window.localStorage.setItem(libraryKey(accountEmail), JSON.stringify(next));
+      if (accountEmail) {
+        window.localStorage.setItem(libraryKey(accountEmail), JSON.stringify(next));
+        void fetch('/api/library', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: accountEmail, library: next }),
+        }).catch(() => undefined);
+      }
       return next;
     });
   }
